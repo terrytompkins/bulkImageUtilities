@@ -1,2 +1,4 @@
 boto3>=1.26.0
-botocore>=1.29.0 
+botocore>=1.29.0
+pillow>=12.0.0  # For AVIF support, use Pillow 12.0.0+ and install libavif
+# For best AVIF results, also install avifenc (libavif-tools) 

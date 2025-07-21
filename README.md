@@ -1,19 +1,29 @@
 # Bulk Image Utilities
 
-A collection of Python utilities for bulk image processing and cloud storage operations. This repository contains two main scripts for converting PNG images to JPEG XL format and benchmarking S3 upload methods.
+A collection of Python utilities for bulk image processing and cloud storage operations. This repository contains two main scripts for converting PNG images to other formats and benchmarking S3 upload methods.
 
 ## Scripts Overview
 
-### 1. PNG to JPEG XL Converter (`convert_and_verify_png_to_jxl.py`)
+### 1. Image Converter (`image_converter.py`)
 
-A high-performance script that converts PNG images to JPEG XL format with parallel processing and integrity verification.
+A high-performance script for bulk converting PNG images to:
+- **Losslessly compressed PNG** (default)
+- **AVIF (lossless)**
+- **JPEG XL (JXL)**
 
 **Features:**
 - Parallel processing of multiple PNG files
-- Lossless conversion verification
+- Lossless PNG compression (with configurable compression level)
+- Lossless AVIF conversion (using Pillow with libavif)
+- Optional conversion to JPEG XL (JXL) with verification
 - Detailed CSV reporting with timing and compression metrics
-- SHA-256 file integrity checks
+- SHA-256 file integrity checks (for JXL verification)
 - Comprehensive error handling
+
+#### Supported Formats
+- `png`: Re-save PNGs with lossless compression (compression level 0-9)
+- `avif`: Convert PNGs to AVIF (lossless, requires Pillow with AVIF support)
+- `jxl`: Convert PNGs to JPEG XL (requires `cjxl`/`djxl` tools)
 
 ### 2. S3 Upload Benchmarker (`s3_uploader_tester.py`)
 
@@ -31,6 +41,8 @@ A benchmarking tool that compares different methods for uploading large batches 
 ### System Dependencies
 
 - **Python 3.9+**
+- **Pillow** (with AVIF support for AVIF conversion; see below)
+- **libavif** (for AVIF conversion; required by Pillow for AVIF support)
 - **JPEG XL tools** (`cjxl` and `djxl`) - Required for PNG to JXL conversion
 - **AWS CLI v2** - For `awscli_sync` method
 - **s5cmd** - For `s5cmd_cp` method (optional)
@@ -47,8 +59,29 @@ pip install -r requirements.txt
 The requirements include:
 - `boto3>=1.26.0`
 - `botocore>=1.29.0`
-- `Pillow` (PIL)
+- `Pillow` (PIL, with AVIF support)
 - `numpy`
+
+#### AVIF Support in Pillow
+- Pillow must be built with AVIF support, which requires `libavif` installed on your system.
+- To check if your Pillow supports AVIF:
+  ```python
+  from PIL import features
+  print(features.check('avif'))
+  ```
+- If `False`, install `libavif` and reinstall Pillow.
+
+**macOS (using Homebrew):**
+```bash
+brew install libavif jpeg-xl
+pip install --upgrade --force-reinstall pillow
+```
+
+**Ubuntu/Debian:**
+```bash
+sudo apt-get install libavif-dev libjxl-tools
+pip install --upgrade --force-reinstall pillow
+```
 
 ## Installation
 
@@ -63,50 +96,39 @@ cd bulkImageUtilities
 pip install -r requirements.txt
 ```
 
-3. Install system dependencies:
-
-**macOS (using Homebrew):**
-```bash
-# Install JPEG XL tools
-brew install jpeg-xl
-
-# Install s5cmd (optional)
-brew install s5cmd
-```
-
-**Ubuntu/Debian:**
-```bash
-# Install JPEG XL tools
-sudo apt-get install libjxl-tools
-
-# Install s5cmd (optional)
-curl -L https://github.com/peak/s5cmd/releases/latest/download/s5cmd_$(uname -s)_$(uname -m).tar.gz | tar -xz
-sudo mv s5cmd /usr/local/bin/
-```
+3. Install system dependencies as above.
 
 ## Usage
 
-### PNG to JPEG XL Conversion
+### Image Conversion and Compression
 
-Convert PNG files in a directory to JPEG XL format with verification:
+Bulk convert PNG files in a directory to compressed PNG, AVIF, or JPEG XL format:
 
 ```bash
-python convert_and_verify_png_to_jxl.py <source_dir> <dest_dir> <report_csv>
+python image_converter.py <source_dir> <dest_dir> <report_csv> [--format png|avif|jxl] [--compression-level 0-9] [--quality N]
 ```
 
-**Example:**
+#### Examples
+
+**1. Convert uncompressed PNGs to maximally compressed PNGs (default):**
 ```bash
-python convert_and_verify_png_to_jxl.py ./png_images ./jxl_output conversion_report.csv
+python image_converter.py ./png_images ./compressed_pngs conversion_report.csv
 ```
 
-**Output:**
-- Converted JXL files in the destination directory
-- CSV report with conversion metrics including:
-  - Original and compressed file sizes
-  - Compression ratios
-  - Conversion and verification timing
-  - Success/failure status
-  - Error messages
+**2. Convert PNGs to lossless AVIF:**
+```bash
+python image_converter.py ./png_images ./avif_output conversion_report.csv --format avif
+```
+
+**3. Convert PNGs to JPEG XL:**
+```bash
+python image_converter.py ./png_images ./jxl_output conversion_report.csv --format jxl
+```
+
+**4. Specify a custom PNG compression level (0 = none, 9 = max, default: 9):**
+```bash
+python image_converter.py ./png_images ./compressed_pngs conversion_report.csv --compression-level 6
+```
 
 ### S3 Upload Benchmarking
 
@@ -152,9 +174,21 @@ export AWS_DEFAULT_REGION=us-east-1
 
 The PNG to JXL converter uses lossless compression (`-d 0` flag). To modify compression settings, edit the `cjxl` command in the script.
 
+### PNG Compression Level
+
+- The PNG converter uses Pillow's `compress_level` (0-9).
+- `0`: No compression (large files, fastest)
+- `9`: Maximum compression (smallest files, slowest, default)
+- Use `--compression-level` to control this.
+
+### AVIF Quality
+
+- By default, AVIF conversion is lossless (`lossless=True`).
+- The `--quality` parameter is reserved for future use (for lossy AVIF).
+
 ## Performance Considerations
 
-### PNG to JXL Conversion
+### Image Conversion
 - Uses parallel processing with `ProcessPoolExecutor`
 - Number of workers defaults to CPU count
 - Each image is processed independently for optimal performance
@@ -168,16 +202,19 @@ The PNG to JXL converter uses lossless compression (`-d 0` flag). To modify comp
 ## Output Formats
 
 ### Conversion Report CSV
-The PNG to JXL converter generates a CSV with the following columns:
+The image converter generates a CSV with the following columns:
 - `filename`: Original PNG filename
 - `png_size_bytes`: Original file size
-- `jxl_size_bytes`: Compressed file size
-- `compression_ratio`: Compression ratio (JXL size / PNG size)
+- `target_size_bytes`: Compressed PNG, AVIF, or JXL file size
+- `compression_ratio`: Compression ratio (target/original)
 - `conversion_success`: Boolean success flag
-- `verification_success`: Boolean verification flag
+- `verification_success`: Boolean verification flag (always true for PNG/AVIF, pixel-checked for JXL)
 - `conversion_start/end`: ISO timestamp of conversion
-- `verification_start/end`: ISO timestamp of verification
+- `verification_start/end`: ISO timestamp of verification (JXL only)
 - `error`: Error message if any
+- `target_format`: Output format (`png`, `avif`, or `jxl`)
+- `compression_level`: PNG compression level (0-9) or blank for AVIF/JXL
+- `quality`: AVIF quality (not used for lossless, reserved for future use)
 
 ### Benchmark Output
 The S3 upload benchmarker provides:
