@@ -10,11 +10,13 @@ A high-performance script for bulk converting PNG images to:
 - **Losslessly compressed PNG** (default)
 - **AVIF (lossless)**
 - **JPEG XL (JXL)**
+- **WebP (lossless)**
 
 **Features:**
 - Parallel processing of multiple PNG files
 - Lossless PNG compression (with configurable compression level)
 - Lossless AVIF conversion (using Pillow with libavif)
+- Lossless WebP conversion (using Pillow)
 - Optional conversion to JPEG XL (JXL) with verification
 - Detailed CSV reporting with timing and compression metrics
 - SHA-256 file integrity checks (for JXL verification)
@@ -23,6 +25,7 @@ A high-performance script for bulk converting PNG images to:
 #### Supported Formats
 - `png`: Re-save PNGs with lossless compression (compression level 0-9)
 - `avif`: Convert PNGs to AVIF (lossless, requires Pillow with AVIF support)
+- `webp`: Convert PNGs to WebP (lossless, requires Pillow with WebP support)
 - `jxl`: Convert PNGs to JPEG XL (requires `cjxl`/`djxl` tools)
 
 ### 2. S3 Upload Benchmarker (`s3_uploader_tester.py`)
@@ -41,7 +44,7 @@ A benchmarking tool that compares different methods for uploading large batches 
 ### System Dependencies
 
 - **Python 3.9+**
-- **Pillow** (with AVIF support for AVIF conversion; see below)
+- **Pillow** (with AVIF/WebP support for AVIF/WebP conversion; see below)
 - **libavif** (for AVIF conversion; required by Pillow for AVIF support)
 - **JPEG XL tools** (`cjxl` and `djxl`) - Required for PNG to JXL conversion
 - **AWS CLI v2** - For `awscli_sync` method
@@ -62,14 +65,17 @@ The requirements include:
 - `Pillow` (PIL, with AVIF support)
 - `numpy`
 
-#### AVIF Support in Pillow
+#### AVIF/WebP Support in Pillow
 - Pillow must be built with AVIF support, which requires `libavif` installed on your system.
-- To check if your Pillow supports AVIF:
+- Pillow must be built with WebP support (usually included by default).
+- **Note**: Pillow 12.0.0+ is recommended for best AVIF/WebP support, but may not be available for Python 3.13+ yet. Use 11.3.0+ as fallback.
+- To check if your Pillow supports AVIF/WebP:
   ```python
   from PIL import features
-  print(features.check('avif'))
+  print(f"AVIF support: {features.check('avif')}")
+  print(f"WebP support: {features.check('webp')}")
   ```
-- If `False`, install `libavif` and reinstall Pillow.
+- If AVIF support is `False`, install `libavif` and reinstall Pillow.
 
 **macOS (using Homebrew):**
 ```bash
@@ -102,10 +108,10 @@ pip install -r requirements.txt
 
 ### Image Conversion and Compression
 
-Bulk convert PNG files in a directory to compressed PNG, AVIF, or JPEG XL format:
+Bulk convert PNG files in a directory to compressed PNG, AVIF, WebP, or JPEG XL format:
 
 ```bash
-python image_converter.py <source_dir> <dest_dir> <report_csv> [--format png|avif|jxl] [--compression-level 0-9] [--quality N]
+python image_converter.py <source_dir> <dest_dir> <report_csv> [--format png|avif|webp|jxl] [--compression-level 0-9] [--quality N]
 ```
 
 #### Examples
@@ -120,12 +126,17 @@ python image_converter.py ./png_images ./compressed_pngs conversion_report.csv
 python image_converter.py ./png_images ./avif_output conversion_report.csv --format avif
 ```
 
-**3. Convert PNGs to JPEG XL:**
+**3. Convert PNGs to WebP:**
+```bash
+python image_converter.py ./png_images ./webp_output conversion_report.csv --format webp
+```
+
+**4. Convert PNGs to JPEG XL:**
 ```bash
 python image_converter.py ./png_images ./jxl_output conversion_report.csv --format jxl
 ```
 
-**4. Specify a custom PNG compression level (0 = none, 9 = max, default: 9):**
+**5. Specify a custom PNG compression level (0 = none, 9 = max, default: 9):**
 ```bash
 python image_converter.py ./png_images ./compressed_pngs conversion_report.csv --compression-level 6
 ```
@@ -181,10 +192,10 @@ The PNG to JXL converter uses lossless compression (`-d 0` flag). To modify comp
 - `9`: Maximum compression (smallest files, slowest, default)
 - Use `--compression-level` to control this.
 
-### AVIF Quality
+### AVIF/WebP Quality
 
-- By default, AVIF conversion is lossless (`lossless=True`).
-- The `--quality` parameter is reserved for future use (for lossy AVIF).
+- By default, AVIF and WebP conversion is lossless (`lossless=True`).
+- The `--quality` parameter is reserved for future use (for lossy AVIF/WebP).
 
 ## Performance Considerations
 
@@ -212,9 +223,9 @@ The image converter generates a CSV with the following columns:
 - `conversion_start/end`: ISO timestamp of conversion
 - `verification_start/end`: ISO timestamp of verification (JXL only)
 - `error`: Error message if any
-- `target_format`: Output format (`png`, `avif`, or `jxl`)
-- `compression_level`: PNG compression level (0-9) or blank for AVIF/JXL
-- `quality`: AVIF quality (not used for lossless, reserved for future use)
+- `target_format`: Output format (`png`, `avif`, `webp`, or `jxl`)
+- `compression_level`: PNG compression level (0-9) or blank for AVIF/WebP/JXL
+- `quality`: AVIF/WebP quality (not used for lossless, reserved for future use)
 
 ### Benchmark Output
 The S3 upload benchmarker provides:

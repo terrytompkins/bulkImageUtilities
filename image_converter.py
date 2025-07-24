@@ -64,6 +64,20 @@ def verify_avif_integrity(original_png, avif_file):
     except Exception as e:
         return False, str(e)
 
+def verify_webp_integrity(original_png, webp_file):
+    """Decode WebP to RGBA, compare pixel arrays (lossless check)."""
+    try:
+        img_orig = Image.open(original_png).convert("RGBA")
+        img_decoded = Image.open(webp_file).convert("RGBA")
+        np_orig = np.array(img_orig)
+        np_decoded = np.array(img_decoded)
+        if np.array_equal(np_orig, np_decoded):
+            return True, "Pixel match"
+        else:
+            return False, "Pixel mismatch"
+    except Exception as e:
+        return False, str(e)
+
 def process_image_png(png_path_str, dest_dir_str, compression_level):
     png_path = Path(png_path_str)
     dest_dir = Path(dest_dir_str)
@@ -207,6 +221,52 @@ def process_image_avif(png_path_str, dest_dir_str, quality):
         row["error"] = f"Verification failed: {message}"
     return row
 
+def process_image_webp(png_path_str, dest_dir_str, quality):
+    png_path = Path(png_path_str)
+    dest_dir = Path(dest_dir_str)
+    webp_path = dest_dir / (png_path.stem + ".webp")
+
+    row = {
+        "filename": png_path.name,
+        "png_size_bytes": png_path.stat().st_size,
+        "target_size_bytes": None,
+        "compression_ratio": "",
+        "conversion_success": False,
+        "verification_success": False,
+        "conversion_start": "",
+        "conversion_end": "",
+        "verification_start": "",
+        "verification_end": "",
+        "error": "",
+        "target_format": "webp",
+        "compression_level": None,
+        "quality": quality,
+        "avif_encoder": None
+    }
+
+    row["conversion_start"] = datetime.utcnow().isoformat()
+    try:
+        img = Image.open(png_path)
+        img.save(webp_path, format="WEBP", lossless=True)
+        row["conversion_success"] = True
+        row["target_size_bytes"] = webp_path.stat().st_size
+        row["compression_ratio"] = f"{row['target_size_bytes'] / row['png_size_bytes']:.4f}"
+    except Exception as e:
+        tb = traceback.format_exc()
+        row["error"] = f"WebP conversion failed: {type(e).__name__}: {e}\n{tb}"
+        row["conversion_end"] = datetime.utcnow().isoformat()
+        return row
+    row["conversion_end"] = datetime.utcnow().isoformat()
+
+    # Pixel-by-pixel verification
+    row["verification_start"] = datetime.utcnow().isoformat()
+    success, message = verify_webp_integrity(png_path, webp_path)
+    row["verification_end"] = datetime.utcnow().isoformat()
+    row["verification_success"] = success
+    if not success:
+        row["error"] = f"Verification failed: {message}"
+    return row
+
 def convert_and_verify_parallel(source_dir, dest_dir, report_path, target_format, compression_level, quality, max_workers=None):
     source = Path(source_dir)
     dest = Path(dest_dir)
@@ -225,6 +285,8 @@ def convert_and_verify_parallel(source_dir, dest_dir, report_path, target_format
             futures = [executor.submit(process_image_png, str(png), str(dest), compression_level) for png in png_files]
         elif target_format == "avif":
             futures = [executor.submit(process_image_avif, str(png), str(dest), quality) for png in png_files]
+        elif target_format == "webp":
+            futures = [executor.submit(process_image_webp, str(png), str(dest), quality) for png in png_files]
         else:
             if not which("cjxl") or not which("djxl"):
                 print("Error: cjxl and/or djxl not found in PATH. Please install jpeg-xl.")
@@ -260,15 +322,15 @@ def convert_and_verify_parallel(source_dir, dest_dir, report_path, target_format
     print(f"\n✅ Report written to: {report_path}")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Bulk PNG image converter: compress PNGs, convert to AVIF or JPEG XL.")
+    parser = argparse.ArgumentParser(description="Bulk PNG image converter: compress PNGs, convert to AVIF, JPEG XL, or WebP.")
     parser.add_argument("source_dir", help="Directory containing source PNG files")
     parser.add_argument("dest_dir", help="Directory to write converted images")
     parser.add_argument("report_csv", help="Path to write CSV report")
     parser.add_argument(
         "--format",
-        choices=["png", "jxl", "avif"],
+        choices=["png", "jxl", "avif", "webp"],
         default="png",
-        help="Target format: 'png' for compressed PNG, 'avif' for AVIF, 'jxl' for JPEG XL (default: png)"
+        help="Target format: 'png' for compressed PNG, 'avif' for AVIF, 'jxl' for JPEG XL, 'webp' for WebP (default: png)"
     )
     parser.add_argument(
         "--compression-level",
@@ -282,7 +344,7 @@ if __name__ == "__main__":
         "--quality",
         type=int,
         default=None,
-        help="AVIF quality (not used for lossless, reserved for future use)."
+        help="Quality parameter for AVIF/WebP (not used for lossless, reserved for future use)."
     )
     parser.add_argument(
         "--max-workers",
@@ -301,6 +363,15 @@ if __name__ == "__main__":
         print(f"avifenc in PATH: {bool(avifenc_path)}")
         if not avif_supported and not avifenc_path:
             print("ERROR: Neither Pillow nor avifenc support AVIF. Please install libavif, Pillow>=12.0.0, or avifenc.")
+            sys.exit(2)
+    
+    # Diagnostics for WebP support
+    if args.format == "webp":
+        print(f"Pillow version: {pillow_version}")
+        webp_supported = features.check('webp')
+        print(f"WebP support: {webp_supported}")
+        if not webp_supported:
+            print("ERROR: Pillow does not support WebP. Please install Pillow with WebP support.")
             sys.exit(2)
 
     convert_and_verify_parallel(
