@@ -3,4 +3,6 @@ botocore>=1.29.0
 pillow>=11.3.0  # For AVIF/WebP support, use Pillow 12.0.0+ and install libavif
 # Note: Pillow 12.0.0+ may not be available for Python 3.13+ yet. Use 11.3.0+ as fallback.
 numpy>=1.21.0  # For image array operations
+opencv-python>=4.8.0  # For image processing and feature extraction
+scikit-learn>=1.3.0  # For clustering and similarity calculations
 # For best AVIF results, also install avifenc (libavif-tools) 
