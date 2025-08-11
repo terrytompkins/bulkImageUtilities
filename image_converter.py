@@ -112,7 +112,10 @@ def group_similar_images(image_paths, similarity_threshold=0.85, min_group_size=
     features_list = []
     valid_paths = []
     
-    for path in image_paths:
+    print("   Extracting image features...")
+    for i, path in enumerate(image_paths):
+        if i % 100 == 0:  # Progress indicator
+            print(f"   Processed {i}/{len(image_paths)} images...")
         features = extract_image_features(path)
         if features is not None:
             features_list.append(features)
@@ -122,37 +125,92 @@ def group_similar_images(image_paths, similarity_threshold=0.85, min_group_size=
         print("⚠️  Not enough valid images for grouping")
         return [[path] for path in valid_paths]
     
-    # Create similarity matrix
-    n_images = len(features_list)
-    similarity_matrix = np.zeros((n_images, n_images))
+    print(f"   Calculating similarity matrix for {len(features_list)} images...")
     
-    for i in range(n_images):
-        for j in range(i+1, n_images):
-            similarity = calculate_image_similarity(features_list[i], features_list[j])
-            similarity_matrix[i][j] = similarity
-            similarity_matrix[j][i] = similarity
-    
-    # Convert similarity to distance for clustering
-    distance_matrix = 1 - similarity_matrix
-    
-    # Use DBSCAN clustering
-    clustering = DBSCAN(eps=1-similarity_threshold, min_samples=min_group_size, metric='precomputed')
-    cluster_labels = clustering.fit_predict(distance_matrix)
-    
-    # Group images by cluster
-    groups = {}
-    for i, label in enumerate(cluster_labels):
-        if label not in groups:
-            groups[label] = []
-        groups[label].append(valid_paths[i])
-    
-    # Convert to list format
-    grouped_images = list(groups.values())
-    
-    # Add single images as individual groups
-    for i, label in enumerate(cluster_labels):
-        if label == -1:  # Noise points (single images)
-            grouped_images.append([valid_paths[i]])
+    # For large datasets, use a more efficient approach
+    if len(features_list) > 1000:
+        print("   Using optimized similarity calculation for large dataset...")
+        # Use a sample-based approach for very large datasets
+        sample_size = min(1000, len(features_list))
+        sample_indices = np.random.choice(len(features_list), sample_size, replace=False)
+        sample_features = [features_list[i] for i in sample_indices]
+        
+        # Calculate similarity for sample
+        n_sample = len(sample_features)
+        similarity_matrix = np.zeros((n_sample, n_sample))
+        
+        for i in range(n_sample):
+            for j in range(i+1, n_sample):
+                similarity = calculate_image_similarity(sample_features[i], sample_features[j])
+                similarity_matrix[i][j] = similarity
+                similarity_matrix[j][i] = similarity
+        
+        # Use sample for clustering
+        distance_matrix = 1 - similarity_matrix
+        clustering = DBSCAN(eps=1-similarity_threshold, min_samples=min_group_size, metric='precomputed')
+        cluster_labels = clustering.fit_predict(distance_matrix)
+        
+        # Map back to full dataset using nearest neighbor
+        print("   Mapping sample clusters to full dataset...")
+        grouped_images = []
+        processed = set()
+        
+        for label in set(cluster_labels):
+            if label == -1:  # Noise points
+                continue
+            group_indices = [i for i, l in enumerate(cluster_labels) if l == label]
+            if len(group_indices) >= min_group_size:
+                # Find similar images in full dataset
+                group_paths = []
+                for idx in group_indices:
+                    sample_feature = sample_features[idx]
+                    for i, feature in enumerate(features_list):
+                        if i not in processed:
+                            similarity = calculate_image_similarity(sample_feature, feature)
+                            if similarity >= similarity_threshold:
+                                group_paths.append(valid_paths[i])
+                                processed.add(i)
+                if len(group_paths) >= min_group_size:
+                    grouped_images.append(group_paths)
+        
+        # Add remaining images as individual groups
+        for i in range(len(valid_paths)):
+            if i not in processed:
+                grouped_images.append([valid_paths[i]])
+    else:
+        # For smaller datasets, use full similarity matrix
+        n_images = len(features_list)
+        similarity_matrix = np.zeros((n_images, n_images))
+        
+        for i in range(n_images):
+            if i % 50 == 0:  # Progress indicator
+                print(f"   Calculating similarities: {i}/{n_images}...")
+            for j in range(i+1, n_images):
+                similarity = calculate_image_similarity(features_list[i], features_list[j])
+                similarity_matrix[i][j] = similarity
+                similarity_matrix[j][i] = similarity
+        
+        # Convert similarity to distance for clustering
+        distance_matrix = 1 - similarity_matrix
+        
+        # Use DBSCAN clustering
+        clustering = DBSCAN(eps=1-similarity_threshold, min_samples=min_group_size, metric='precomputed')
+        cluster_labels = clustering.fit_predict(distance_matrix)
+        
+        # Group images by cluster
+        groups = {}
+        for i, label in enumerate(cluster_labels):
+            if label not in groups:
+                groups[label] = []
+            groups[label].append(valid_paths[i])
+        
+        # Convert to list format
+        grouped_images = list(groups.values())
+        
+        # Add single images as individual groups
+        for i, label in enumerate(cluster_labels):
+            if label == -1:  # Noise points (single images)
+                grouped_images.append([valid_paths[i]])
     
     print(f"📊 Found {len(grouped_images)} groups:")
     for i, group in enumerate(grouped_images):
