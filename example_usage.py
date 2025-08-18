@@ -95,8 +95,8 @@ def main():
         "--archive-tool", "7z",
         "--archive-compression-level", "7",
         "--batch-size-mb", "200",
-        "--7z-solid",
-        "--7z-multithread",
+        "--sevenz-solid",
+        "--sevenz-multithread",
         "--max-workers", "2"
     ]
     run_command(cmd4, "PNG compression + 7z archiving (maximum compression)")

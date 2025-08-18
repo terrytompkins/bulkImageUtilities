@@ -95,8 +95,8 @@ python image_converter.py sample_images output_max report.csv \
   --archive-tool 7z \
   --archive-compression-level 7 \
   --batch-size-mb 200 \
-  --7z-solid \
-  --7z-multithread
+  --sevenz-solid \
+  --sevenz-multithread
 ```
 
 ## 🔧 Command Line Options
@@ -131,8 +131,8 @@ python image_converter.py sample_images output_max report.csv \
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--7z-solid` | Enable solid compression | True |
-| `--7z-multithread` | Enable multithreading | True |
+| `--sevenz-solid` | Enable solid compression | True |
+| `--sevenz-multithread` | Enable multithreading | True |
 
 ### Processing Options
 

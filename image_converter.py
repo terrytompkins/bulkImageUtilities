@@ -1013,6 +1013,8 @@ def process_png_compression_parallel(source_dir, compression_tool="oxipng", effo
     
     # Save report if requested
     if report_path:
+        report_dir = Path(report_path).parent
+        report_dir.mkdir(parents=True, exist_ok=True)
         with open(report_path, 'w') as f:
             json.dump(results, f, indent=2, default=str)
     
@@ -1101,6 +1103,8 @@ def process_archiving_parallel(batch_dirs, archive_tool="zstd", compression_leve
     
     # Save report if requested
     if report_path:
+        report_dir = Path(report_path).parent
+        report_dir.mkdir(parents=True, exist_ok=True)
         with open(report_path, 'w') as f:
             json.dump(results, f, indent=2, default=str)
     
@@ -1286,13 +1290,13 @@ if __name__ == "__main__":
         help="Path to zstd dictionary file for better compression"
     )
     parser.add_argument(
-        "--7z-solid",
+        "--sevenz-solid",
         action="store_true",
         default=True,
         help="Enable solid compression for 7z (default: True)"
     )
     parser.add_argument(
-        "--7z-multithread",
+        "--sevenz-multithread",
         action="store_true",
         default=True,
         help="Enable multithreading for 7z (default: True)"
@@ -1418,7 +1422,9 @@ if __name__ == "__main__":
                 args.source_dir, args.similarity_threshold, args.min_group_size, args.selection_method
             )
             # Save filtering report
-            filtering_report_path = args.report_csv.replace('.csv', '_filtering_report.json')
+            report_dir = Path(args.report_csv).parent
+            report_dir.mkdir(parents=True, exist_ok=True)
+            filtering_report_path = report_dir / f"{Path(args.report_csv).stem}_filtering_report.json"
             with open(filtering_report_path, 'w') as f:
                 json.dump(filtering_report, f, indent=2, default=str)
             print(f"📊 Filtering report saved to: {filtering_report_path}")
@@ -1433,6 +1439,8 @@ if __name__ == "__main__":
         )
         
         # Create basic CSV report for compatibility
+        report_dir = Path(args.report_csv).parent
+        report_dir.mkdir(parents=True, exist_ok=True)
         with open(args.report_csv, mode="w", newline="") as csvfile:
             fieldnames = ["filename", "original_size", "compressed_size", "compression_ratio", "tool", "success", "error"]
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
