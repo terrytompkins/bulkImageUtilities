@@ -46,3 +46,6 @@ Thumbs.db
 
 # Test output and debug artifacts
 tests/output/
+
+# CSV reports and analysis outputs
+*.csv
