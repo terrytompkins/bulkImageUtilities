@@ -16,6 +16,8 @@ import cv2
 from sklearn.cluster import DBSCAN
 from sklearn.metrics.pairwise import cosine_similarity
 import json
+import glob
+import math
 
 def hash_file(path):
     h = hashlib.sha256()
@@ -378,6 +380,420 @@ def verify_webp_integrity(original_png, webp_file):
     except Exception as e:
         return False, str(e)
 
+def compress_png_with_oxipng(png_path, effort_level=4, strip_metadata=True):
+    """
+    Compress PNG using oxipng with specified effort level.
+    
+    Args:
+        png_path (Path): Path to PNG file
+        effort_level (int): Compression effort (0-7, higher = smaller but slower)
+        strip_metadata (bool): Whether to strip non-essential metadata
+        
+    Returns:
+        dict: Compression results
+    """
+    if not which("oxipng"):
+        return {"success": False, "error": "oxipng not found in PATH"}
+    
+    original_size = png_path.stat().st_size
+    result = {
+        "tool": "oxipng",
+        "filename": str(png_path),
+        "original_size": original_size,
+        "compressed_size": None,
+        "compression_ratio": None,
+        "success": False,
+        "error": None,
+        "start_time": datetime.utcnow().isoformat()
+    }
+    
+    try:
+        cmd = ["oxipng", f"-o{effort_level}", "--threads", "0"]
+        if strip_metadata:
+            cmd.extend(["--strip", "safe"])
+        cmd.extend(["-r", str(png_path)])
+        
+        process = subprocess.run(cmd, capture_output=True, text=True, timeout=300)  # 5 minute timeout per file
+        result["end_time"] = datetime.utcnow().isoformat()
+        
+        if process.returncode == 0:
+            compressed_size = png_path.stat().st_size
+            result.update({
+                "success": True,
+                "compressed_size": compressed_size,
+                "compression_ratio": compressed_size / original_size
+            })
+        else:
+            result["error"] = process.stderr.strip()
+            
+    except Exception as e:
+        result["error"] = str(e)
+        result["end_time"] = datetime.utcnow().isoformat()
+    
+    return result
+
+def compress_png_with_zopflipng(png_path, iterations=15, filters="01234mepb"):
+    """
+    Compress PNG using zopflipng with specified parameters.
+    
+    Args:
+        png_path (Path): Path to PNG file
+        iterations (int): Number of optimization iterations
+        filters (str): Filter strategies to try
+        
+    Returns:
+        dict: Compression results
+    """
+    if not which("zopflipng"):
+        return {"success": False, "error": "zopflipng not found in PATH"}
+    
+    original_size = png_path.stat().st_size
+    result = {
+        "tool": "zopflipng",
+        "filename": str(png_path),
+        "original_size": original_size,
+        "compressed_size": None,
+        "compression_ratio": None,
+        "success": False,
+        "error": None,
+        "start_time": datetime.utcnow().isoformat()
+    }
+    
+    try:
+        # Create temporary output file
+        with NamedTemporaryFile(suffix=".png", delete=False) as tmp_file:
+            temp_output = tmp_file.name
+        
+        cmd = [
+            "zopflipng", "--lossless", "-y",
+            f"--iterations={iterations}",
+            f"--filters={filters}",
+            str(png_path), temp_output
+        ]
+        
+        process = subprocess.run(cmd, capture_output=True, text=True)
+        result["end_time"] = datetime.utcnow().isoformat()
+        
+        if process.returncode == 0:
+            compressed_size = Path(temp_output).stat().st_size
+            # Replace original with compressed version
+            os.replace(temp_output, png_path)
+            result.update({
+                "success": True,
+                "compressed_size": compressed_size,
+                "compression_ratio": compressed_size / original_size
+            })
+        else:
+            result["error"] = process.stderr.strip()
+            if os.path.exists(temp_output):
+                os.remove(temp_output)
+                
+    except Exception as e:
+        result["error"] = str(e)
+        result["end_time"] = datetime.utcnow().isoformat()
+        if os.path.exists(temp_output):
+            os.remove(temp_output)
+    
+    return result
+
+def compress_png_with_pngcrush(png_path, brute_force=True, reduce_colors=True):
+    """
+    Compress PNG using pngcrush with specified parameters.
+    
+    Args:
+        png_path (Path): Path to PNG file
+        brute_force (bool): Use exhaustive compression trials
+        reduce_colors (bool): Apply lossless bit-depth/color-type reductions
+        
+    Returns:
+        dict: Compression results
+    """
+    if not which("pngcrush"):
+        return {"success": False, "error": "pngcrush not found in PATH"}
+    
+    original_size = png_path.stat().st_size
+    result = {
+        "tool": "pngcrush",
+        "filename": str(png_path),
+        "original_size": original_size,
+        "compressed_size": None,
+        "compression_ratio": None,
+        "success": False,
+        "error": None,
+        "start_time": datetime.utcnow().isoformat()
+    }
+    
+    try:
+        cmd = ["pngcrush"]
+        if brute_force:
+            cmd.append("-brute")
+        if reduce_colors:
+            cmd.append("-reduce")
+        cmd.extend(["-ow", str(png_path)])
+        
+        process = subprocess.run(cmd, capture_output=True, text=True)
+        result["end_time"] = datetime.utcnow().isoformat()
+        
+        if process.returncode == 0:
+            compressed_size = png_path.stat().st_size
+            result.update({
+                "success": True,
+                "compressed_size": compressed_size,
+                "compression_ratio": compressed_size / original_size
+            })
+        else:
+            result["error"] = process.stderr.strip()
+            
+    except Exception as e:
+        result["error"] = str(e)
+        result["end_time"] = datetime.utcnow().isoformat()
+    
+    return result
+
+def create_archive_with_zstd(source_dir, output_path, compression_level=9, long_range=True, ultra=False, dictionary_path=None):
+    """
+    Create archive using tar + zstd compression.
+    
+    Args:
+        source_dir (Path): Directory to archive
+        output_path (Path): Output archive path
+        compression_level (int): zstd compression level (1-22)
+        long_range (bool): Enable long-range matching
+        ultra (bool): Enable ultra compression mode
+        dictionary_path (str): Path to zstd dictionary file
+        
+    Returns:
+        dict: Archive creation results
+    """
+    if not which("zstd"):
+        return {"success": False, "error": "zstd not found in PATH"}
+    
+    source_size = sum(f.stat().st_size for f in source_dir.rglob('*') if f.is_file())
+    result = {
+        "tool": "tar+zstd",
+        "source_dir": str(source_dir),
+        "output_path": str(output_path),
+        "source_size": source_size,
+        "archive_size": None,
+        "compression_ratio": None,
+        "success": False,
+        "error": None,
+        "start_time": datetime.utcnow().isoformat()
+    }
+    
+    try:
+        # Build zstd command
+        zstd_path = which("zstd")
+        if not zstd_path:
+            return {"success": False, "error": "zstd not found in PATH"}
+        
+        zstd_cmd = f"{zstd_path} -{compression_level}"
+        if ultra:
+            zstd_cmd += " --ultra"
+        if dictionary_path:
+            zstd_cmd += f" --dict={dictionary_path}"
+        
+        cmd = f"tar -cf - {source_dir} | {zstd_cmd} > {output_path}"
+        
+        process = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        result["end_time"] = datetime.utcnow().isoformat()
+        
+        if process.returncode == 0:
+            archive_size = output_path.stat().st_size
+            result.update({
+                "success": True,
+                "archive_size": archive_size,
+                "compression_ratio": archive_size / source_size
+            })
+        else:
+            result["error"] = process.stderr.strip()
+            
+    except Exception as e:
+        result["error"] = str(e)
+        result["end_time"] = datetime.utcnow().isoformat()
+    
+    return result
+
+def create_archive_with_7z(source_dir, output_path, compression_level=7, solid=True, multithread=True):
+    """
+    Create archive using 7z with LZMA2 compression.
+    
+    Args:
+        source_dir (Path): Directory to archive
+        output_path (Path): Output archive path
+        compression_level (int): 7z compression level (0-9)
+        solid (bool): Enable solid compression
+        multithread (bool): Enable multithreading
+        
+    Returns:
+        dict: Archive creation results
+    """
+    if not which("7z"):
+        return {"success": False, "error": "7z not found in PATH"}
+    
+    # Get all PNG files in the source directory
+    png_files = list(source_dir.glob("*.png"))
+    source_size = sum(f.stat().st_size for f in png_files)
+    result = {
+        "tool": "7z",
+        "source_size": source_size,
+        "archive_size": None,
+        "compression_ratio": None,
+        "success": False,
+        "error": None,
+        "start_time": datetime.utcnow().isoformat()
+    }
+    
+    try:
+        cmd = ["7z", "a", "-t7z", "-m0=lzma2", f"-mx={compression_level}"]
+        if solid:
+            cmd.append("-ms=on")
+        if multithread:
+            cmd.append("-mmt=on")
+        
+        if png_files:
+            cmd.extend([str(output_path)] + [str(f) for f in png_files])
+        else:
+            cmd.extend([str(output_path), "*"])
+        
+
+        
+        process = subprocess.run(cmd, capture_output=True, text=True)
+        result["end_time"] = datetime.utcnow().isoformat()
+        
+        if process.returncode == 0:
+            archive_size = output_path.stat().st_size
+            result.update({
+                "success": True,
+                "archive_size": archive_size,
+                "compression_ratio": archive_size / source_size
+            })
+        else:
+            result["error"] = process.stderr.strip()
+            
+    except Exception as e:
+        result["error"] = str(e)
+        result["end_time"] = datetime.utcnow().isoformat()
+    
+    return result
+
+def create_archive_with_pigz(source_dir, output_path, compression_level=9, parallel=True):
+    """
+    Create archive using tar + pigz compression.
+    
+    Args:
+        source_dir (Path): Directory to archive
+        output_path (Path): Output archive path
+        compression_level (int): pigz compression level (1-9)
+        parallel (bool): Enable parallel processing
+        
+    Returns:
+        dict: Archive creation results
+    """
+    if not which("pigz"):
+        return {"success": False, "error": "pigz not found in PATH"}
+    
+    source_size = sum(f.stat().st_size for f in source_dir.rglob('*') if f.is_file())
+    result = {
+        "tool": "tar+pigz",
+        "source_size": source_size,
+        "archive_size": None,
+        "compression_ratio": None,
+        "success": False,
+        "error": None,
+        "start_time": datetime.utcnow().isoformat()
+    }
+    
+    try:
+        pigz_cmd = f"pigz -{compression_level}"
+        if parallel:
+            pigz_cmd += " -p 0"
+        
+        cmd = ["tar", "-I", pigz_cmd, "-cvf", str(output_path), str(source_dir)]
+        
+        process = subprocess.run(cmd, capture_output=True, text=True)
+        result["end_time"] = datetime.utcnow().isoformat()
+        
+        if process.returncode == 0:
+            archive_size = output_path.stat().st_size
+            result.update({
+                "success": True,
+                "archive_size": archive_size,
+                "compression_ratio": archive_size / source_size
+            })
+        else:
+            result["error"] = process.stderr.strip()
+            
+    except Exception as e:
+        result["error"] = str(e)
+        result["end_time"] = datetime.utcnow().isoformat()
+    
+    return result
+
+def create_batches(source_dir, target_size_mb=300, output_dir=None):
+    """
+    Create batches of files with target size in MB.
+    
+    Args:
+        source_dir (Path): Source directory containing files
+        target_size_mb (int): Target batch size in MB
+        output_dir (Path): Output directory for batches (optional, uses source_dir/batches if None)
+        
+    Returns:
+        list: List of batch directories
+    """
+    if output_dir is None:
+        output_dir = source_dir / "batches"
+    
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    target_size_bytes = target_size_mb * 1024 * 1024
+    png_files = list(source_dir.glob("*.png"))
+    
+    if not png_files:
+        return []
+    
+    batches = []
+    current_batch = []
+    current_size = 0
+    batch_num = 1
+    
+    for png_file in png_files:
+        file_size = png_file.stat().st_size
+        
+        # Start new batch if adding this file would exceed target
+        if current_size + file_size > target_size_bytes and current_batch:
+            # Create batch directory and move files
+            batch_dir = output_dir / f"part{batch_num:02d}"
+            batch_dir.mkdir(exist_ok=True)
+            
+            for file_path in current_batch:
+                dest_path = batch_dir / file_path.name
+                import shutil
+                shutil.copy2(str(file_path), str(dest_path))
+            
+            batches.append(batch_dir)
+            batch_num += 1
+            current_batch = []
+            current_size = 0
+        
+        current_batch.append(png_file)
+        current_size += file_size
+    
+    # Handle remaining files
+    if current_batch:
+        batch_dir = output_dir / f"part{batch_num:02d}"
+        batch_dir.mkdir(exist_ok=True)
+        
+        for file_path in current_batch:
+            dest_path = batch_dir / file_path.name
+            import shutil
+            shutil.copy2(str(file_path), str(dest_path))
+        
+        batches.append(batch_dir)
+    
+    return batches
+
 def process_image_png(png_path_str, dest_dir_str, compression_level):
     png_path = Path(png_path_str)
     dest_dir = Path(dest_dir_str)
@@ -403,8 +819,15 @@ def process_image_png(png_path_str, dest_dir_str, compression_level):
 
     row["conversion_start"] = datetime.utcnow().isoformat()
     try:
-        img = Image.open(png_path)
-        img.save(compressed_png_path, format="PNG", compress_level=compression_level)
+        if compression_level == 0:
+            # For compression level 0, just copy the file without re-encoding
+            import shutil
+            shutil.copy2(png_path, compressed_png_path)
+        else:
+            # For other compression levels, re-encode with Pillow
+            img = Image.open(png_path)
+            img.save(compressed_png_path, format="PNG", compress_level=compression_level)
+        
         row["conversion_success"] = True
         row["target_size_bytes"] = compressed_png_path.stat().st_size
         row["compression_ratio"] = f"{row['target_size_bytes'] / row['png_size_bytes']:.4f}"
@@ -567,6 +990,161 @@ def process_image_webp(png_path_str, dest_dir_str, quality):
         row["error"] = f"Verification failed: {message}"
     return row
 
+def process_png_compression_parallel(source_dir, compression_tool="oxipng", effort_level=4, 
+                                   max_workers=None, report_path=None):
+    """
+    Process PNG compression in parallel using specified tool.
+    
+    Args:
+        source_dir (Path): Source directory
+        compression_tool (str): Tool to use ('oxipng', 'zopflipng', 'pngcrush')
+        effort_level (int): Compression effort level
+        max_workers (int): Maximum parallel workers
+        report_path (str): Path to save compression report
+        
+    Returns:
+        list: List of compression results
+    """
+    png_files = list(source_dir.glob("*.png"))
+    
+    if not png_files:
+        print("No PNG files found for compression.")
+        return []
+    
+    print(f"🧵 Starting parallel PNG compression with {compression_tool}...")
+    print(f"📁 Found {len(png_files)} PNG files to process")
+    
+    results = []
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        if compression_tool == "oxipng":
+            futures = [executor.submit(compress_png_with_oxipng, png, effort_level) for png in png_files]
+        elif compression_tool == "zopflipng":
+            futures = [executor.submit(compress_png_with_zopflipng, png, effort_level) for png in png_files]
+        elif compression_tool == "pngcrush":
+            futures = [executor.submit(compress_png_with_pngcrush, png, True, True) for png in png_files]
+        else:
+            print(f"Unknown compression tool: {compression_tool}")
+            return []
+        
+        # Add progress monitoring
+        completed = 0
+        total = len(futures)
+        print(f"🔄 Processing {total} files with {max_workers} workers...")
+        
+        for future in as_completed(futures):
+            completed += 1
+            if completed % 100 == 0 or completed == total:
+                print(f"📊 Progress: {completed}/{total} files processed ({completed/total*100:.1f}%)")
+            results.append(future.result())
+    
+    # Save report if requested
+    if report_path:
+        report_dir = Path(report_path).parent
+        report_dir.mkdir(parents=True, exist_ok=True)
+        with open(report_path, 'w') as f:
+            json.dump(results, f, indent=2, default=str)
+    
+    # Print summary
+    successful = [r for r in results if r["success"]]
+    if successful:
+        total_original = sum(r["original_size"] for r in successful)
+        total_compressed = sum(r["compressed_size"] for r in successful)
+        avg_ratio = total_compressed / total_original
+        print(f"✅ Compression complete: {len(successful)}/{len(results)} files processed")
+        print(f"📊 Average compression ratio: {avg_ratio:.4f} ({((1-avg_ratio)*100):.1f}% reduction)")
+    
+    return results
+
+def process_archiving_parallel(batch_dirs, archive_tool="zstd", compression_level=9, 
+                             output_dir=None, max_workers=None, report_path=None,
+                             zstd_long_range=True, zstd_ultra=False, zstd_dictionary=None,
+                             sevenz_solid=True, sevenz_multithread=True):
+    """
+    Process archiving in parallel using specified tool.
+    
+    Args:
+        batch_dirs (list): List of batch directories to archive
+        archive_tool (str): Tool to use ('zstd', '7z', 'pigz')
+        compression_level (int): Compression level
+        output_dir (Path): Output directory for archives
+        max_workers (int): Maximum parallel workers
+        report_path (str): Path to save archiving report
+        zstd_long_range (bool): Enable long-range matching for zstd
+        zstd_ultra (bool): Enable ultra compression for zstd
+        zstd_dictionary (str): Path to zstd dictionary file
+        sevenz_solid (bool): Enable solid compression for 7z
+        sevenz_multithread (bool): Enable multithreading for 7z
+        
+    Returns:
+        list: List of archiving results
+    """
+    if output_dir is None:
+        output_dir = Path.cwd()
+    
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    print(f"📦 Starting parallel archiving with {archive_tool}...")
+    
+    results = []
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        futures = []
+        
+        for batch_dir in batch_dirs:
+            batch_name = batch_dir.name
+            if archive_tool == "zstd":
+                output_path = output_dir / f"{batch_name}.tar.zst"
+                futures.append(executor.submit(
+                    create_archive_with_zstd, 
+                    batch_dir, 
+                    output_path, 
+                    compression_level,
+                    zstd_long_range,
+                    zstd_ultra,
+                    zstd_dictionary
+                ))
+            elif archive_tool == "7z":
+                output_path = output_dir / f"{batch_name}.7z"
+                futures.append(executor.submit(
+                    create_archive_with_7z, 
+                    batch_dir, 
+                    output_path, 
+                    compression_level,
+                    sevenz_solid,
+                    sevenz_multithread
+                ))
+            elif archive_tool == "pigz":
+                output_path = output_dir / f"{batch_name}.tar.gz"
+                futures.append(executor.submit(
+                    create_archive_with_pigz, 
+                    batch_dir, 
+                    output_path, 
+                    compression_level
+                ))
+            else:
+                print(f"Unknown archive tool: {archive_tool}")
+                return []
+        
+        for future in as_completed(futures):
+            results.append(future.result())
+    
+    # Save report if requested
+    if report_path:
+        report_dir = Path(report_path).parent
+        report_dir.mkdir(parents=True, exist_ok=True)
+        with open(report_path, 'w') as f:
+            json.dump(results, f, indent=2, default=str)
+    
+    # Print summary
+    successful = [r for r in results if r["success"]]
+    if successful:
+        total_source = sum(r["source_size"] for r in successful)
+        total_archive = sum(r["archive_size"] for r in successful)
+        avg_ratio = total_archive / total_source
+        print(f"✅ Archiving complete: {len(successful)}/{len(results)} archives created")
+        print(f"📊 Average compression ratio: {avg_ratio:.4f} ({((1-avg_ratio)*100):.1f}% reduction)")
+    
+    return results
+
 def convert_and_verify_parallel(source_dir, dest_dir, report_path, target_format, compression_level, quality, max_workers=None, 
                               use_filtering=False, similarity_threshold=0.85, min_group_size=2, selection_method='best_quality'):
     source = Path(source_dir)
@@ -649,10 +1227,12 @@ def convert_and_verify_parallel(source_dir, dest_dir, report_path, target_format
     print(f"\n✅ Report written to: {report_path}")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Bulk PNG image converter: compress PNGs, convert to AVIF, JPEG XL, or WebP.")
+    parser = argparse.ArgumentParser(description="Bulk PNG image converter: compress PNGs, convert to AVIF, JPEG XL, or WebP, and optionally create archives.")
     parser.add_argument("source_dir", help="Directory containing source PNG files")
     parser.add_argument("dest_dir", help="Directory to write converted images")
     parser.add_argument("report_csv", help="Path to write CSV report")
+    
+    # Format and conversion options
     parser.add_argument(
         "--format",
         choices=["png", "jxl", "avif", "webp"],
@@ -673,12 +1253,91 @@ if __name__ == "__main__":
         default=None,
         help="Quality parameter for AVIF/WebP (not used for lossless, reserved for future use)."
     )
+    
+    # Advanced PNG compression options
+    parser.add_argument(
+        "--png-compression-tool",
+        choices=["pillow", "oxipng", "zopflipng", "pngcrush"],
+        default="pillow",
+        help="Tool for PNG compression: 'pillow' (built-in), 'oxipng' (fast), 'zopflipng' (max compression), 'pngcrush' (classic) (default: pillow)"
+    )
+    parser.add_argument(
+        "--png-effort-level",
+        type=int,
+        default=4,
+        help="Compression effort level for oxipng (0-7) or zopflipng iterations (default: 4)"
+    )
+    parser.add_argument(
+        "--strip-metadata",
+        action="store_true",
+        help="Strip non-essential metadata from PNGs (for oxipng)"
+    )
+    
+    # Archiving options
+    parser.add_argument(
+        "--create-archives",
+        action="store_true",
+        help="Create compressed archives after image processing"
+    )
+
+    parser.add_argument(
+        "--archive-tool",
+        choices=["zstd", "7z", "pigz"],
+        default="zstd",
+        help="Archive compression tool: 'zstd' (balanced), '7z' (max compression), 'pigz' (fast) (default: zstd)"
+    )
+    parser.add_argument(
+        "--archive-compression-level",
+        type=int,
+        default=9,
+        help="Archive compression level: zstd (1-22), 7z (0-9), pigz (1-9) (default: 9)"
+    )
+    parser.add_argument(
+        "--batch-size-mb",
+        type=int,
+        default=300,
+        help="Target batch size in MB for archiving (default: 300)"
+    )
+    parser.add_argument(
+        "--archive-output-dir",
+        help="Output directory for archives (default: dest_dir)"
+    )
+    parser.add_argument(
+        "--zstd-long-range",
+        action="store_true",
+        help="Enable long-range matching for zstd (better for similar images)"
+    )
+    parser.add_argument(
+        "--zstd-ultra",
+        action="store_true",
+        help="Enable ultra compression mode for zstd (slower but smaller)"
+    )
+    parser.add_argument(
+        "--zstd-dictionary",
+        help="Path to zstd dictionary file for better compression"
+    )
+    parser.add_argument(
+        "--sevenz-solid",
+        action="store_true",
+        default=True,
+        help="Enable solid compression for 7z (default: True)"
+    )
+    parser.add_argument(
+        "--sevenz-multithread",
+        action="store_true",
+        default=True,
+        help="Enable multithreading for 7z (default: True)"
+    )
+    
+    # Parallel processing options
     parser.add_argument(
         "--max-workers",
         type=int,
         default=None,
         help="Maximum number of parallel workers (default: CPU count)"
     )
+    
+    # Filtering options
     parser.add_argument(
         "--filter-similar",
         action="store_true",
@@ -702,6 +1361,24 @@ if __name__ == "__main__":
         default="best_quality",
         help="Method for selecting representative images from groups (default: best_quality)"
     )
+    
+    # Report options
+    parser.add_argument(
+        "--compression-report",
+        help="Path to save PNG compression report (JSON format)"
+    )
+    parser.add_argument(
+        "--archive-report",
+        help="Path to save archive creation report (JSON format)"
+    )
+    
+    # Dry run option
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print planned operations without executing them"
+    )
+    
     args = parser.parse_args()
 
     # Diagnostics for AVIF support
@@ -724,16 +1401,190 @@ if __name__ == "__main__":
             print("ERROR: Pillow does not support WebP. Please install Pillow with WebP support.")
             sys.exit(2)
 
-    convert_and_verify_parallel(
-        args.source_dir,
-        args.dest_dir,
-        args.report_csv,
-        args.format,
-        args.compression_level,
-        args.quality,
-        args.max_workers,
-        args.filter_similar,
-        args.similarity_threshold,
-        args.min_group_size,
-        args.selection_method
-    )
+    # Check for required tools based on options
+    if args.png_compression_tool != "pillow":
+        tool_map = {
+            "oxipng": "oxipng",
+            "zopflipng": "zopflipng", 
+            "pngcrush": "pngcrush"
+        }
+        tool_name = tool_map.get(args.png_compression_tool)
+        if tool_name and not which(tool_name):
+            print(f"ERROR: {tool_name} not found in PATH. Please install {tool_name}.")
+            sys.exit(2)
+    
+    if args.create_archives:
+        archive_tool_map = {
+            "zstd": "zstd",
+            "7z": "7z",
+            "pigz": "pigz"
+        }
+        tool_name = archive_tool_map.get(args.archive_tool)
+        if tool_name and not which(tool_name):
+            print(f"ERROR: {tool_name} not found in PATH. Please install {tool_name}.")
+            sys.exit(2)
+
+    # Dry run mode
+    if args.dry_run:
+        print("🔍 DRY RUN MODE - Planned operations:")
+        print(f"   Source directory: {args.source_dir}")
+        print(f"   Destination directory: {args.dest_dir}")
+        print(f"   Target format: {args.format}")
+        if args.png_compression_tool != "pillow":
+            print(f"   PNG compression tool: {args.png_compression_tool} (effort level: {args.png_effort_level})")
+        if args.create_archives:
+            print(f"   Archive tool: {args.archive_tool} (compression level: {args.archive_compression_level})")
+            print(f"   Batch size: {args.batch_size_mb} MB")
+        print("   (No files will be modified)")
+        sys.exit(0)
+
+    # Step 1: Convert/compress images
+    print("🖼️  Step 1: Processing images...")
+    if args.png_compression_tool != "pillow":
+        # Use advanced PNG compression tools
+        source_path = Path(args.source_dir)
+        if args.filter_similar:
+            print("🔍 Applying similarity-based filtering...")
+            filtered_images, filtering_report = filter_images_by_similarity(
+                args.source_dir, args.similarity_threshold, args.min_group_size, args.selection_method
+            )
+            # Save filtering report
+            report_dir = Path(args.report_csv).parent
+            report_dir.mkdir(parents=True, exist_ok=True)
+            filtering_report_path = report_dir / f"{Path(args.report_csv).stem}_filtering_report.json"
+            with open(filtering_report_path, 'w') as f:
+                json.dump(filtering_report, f, indent=2, default=str)
+            print(f"📊 Filtering report saved to: {filtering_report_path}")
+        
+        # First, copy all PNG files from source to destination
+        print("📁 Copying PNG files from source to destination...")
+        dest_path = Path(args.dest_dir)
+        dest_path.mkdir(parents=True, exist_ok=True)
+        
+        png_files = list(source_path.glob("*.png"))
+        copied_count = 0
+        for png_file in png_files:
+            dest_file = dest_path / png_file.name
+            import shutil
+            shutil.copy2(png_file, dest_file)
+            copied_count += 1
+        
+        print(f"✅ Copied {copied_count} PNG files to: {args.dest_dir}")
+        
+        # Process PNG compression with advanced tools on destination files
+        compression_results = process_png_compression_parallel(
+            dest_path,
+            args.png_compression_tool,
+            args.png_effort_level,
+            args.max_workers,
+            args.compression_report
+        )
+        
+        # Create basic CSV report for compatibility
+        report_dir = Path(args.report_csv).parent
+        report_dir.mkdir(parents=True, exist_ok=True)
+        
+        print(f"📊 Writing CSV report with {len(compression_results)} results...")
+        successful_count = sum(1 for r in compression_results if r.get("success", False))
+        print(f"📊 Successful compressions: {successful_count}/{len(compression_results)}")
+        
+        with open(args.report_csv, mode="w", newline="") as csvfile:
+            fieldnames = ["filename", "original_size", "compressed_size", "compression_ratio", "tool", "success", "error"]
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            for result in compression_results:
+                if result.get("success", False):
+                    writer.writerow({
+                        "filename": Path(result["filename"]).name,
+                        "original_size": result["original_size"],
+                        "compressed_size": result["compressed_size"],
+                        "compression_ratio": f"{result['compression_ratio']:.4f}",
+                        "tool": result["tool"],
+                        "success": result["success"],
+                        "error": result.get("error", "")
+                    })
+                else:
+                    # Write failed results too for debugging
+                    writer.writerow({
+                        "filename": Path(result.get("filename", "unknown")).name,
+                        "original_size": result.get("original_size", 0),
+                        "compressed_size": result.get("compressed_size", 0),
+                        "compression_ratio": "0.0000",
+                        "tool": result.get("tool", "unknown"),
+                        "success": result.get("success", False),
+                        "error": result.get("error", "Unknown error")
+                    })
+        
+        print(f"✅ Image processing complete. Report written to: {args.report_csv}")
+        
+    else:
+        # Use original conversion logic
+        convert_and_verify_parallel(
+            args.source_dir,
+            args.dest_dir,
+            args.report_csv,
+            args.format,
+            args.compression_level,
+            args.quality,
+            args.max_workers,
+            args.filter_similar,
+            args.similarity_threshold,
+            args.min_group_size,
+            args.selection_method
+        )
+
+    # Step 2: Create archives if requested
+    if args.create_archives:
+        print("\n📦 Step 2: Creating archives...")
+        
+        # Ensure files are in destination directory for archiving
+        dest_path = Path(args.dest_dir)
+        dest_path.mkdir(parents=True, exist_ok=True)
+        
+        # Check if destination has PNG files
+        if not any(dest_path.glob("*.png")):
+            print("📁 Copying PNG files to destination for archiving...")
+            source_path = Path(args.source_dir)
+            png_files = list(source_path.glob("*.png"))
+            copied_count = 0
+            for png_file in png_files:
+                dest_file = dest_path / png_file.name
+                import shutil
+                shutil.copy2(png_file, dest_file)
+                copied_count += 1
+            print(f"✅ Copied {copied_count} PNG files to destination")
+        
+        # Always archive from destination directory
+        archive_source = dest_path
+        
+        # Create batches
+        print(f"📁 Creating batches of ~{args.batch_size_mb} MB...")
+        batch_dirs = create_batches(archive_source, args.batch_size_mb, archive_source / "batches")
+        print(f"✅ Created {len(batch_dirs)} batches")
+        
+        # Determine archive output directory
+        archive_output_dir = Path(args.archive_output_dir) if args.archive_output_dir else Path(args.dest_dir)
+        
+        # Process archiving
+        archive_results = process_archiving_parallel(
+            batch_dirs,
+            args.archive_tool,
+            args.archive_compression_level,
+            archive_output_dir,
+            args.max_workers,
+            args.archive_report,
+            args.zstd_long_range,
+            args.zstd_ultra,
+            args.zstd_dictionary,
+            args.sevenz_solid,
+            args.sevenz_multithread
+        )
+        
+        print(f"✅ Archive creation complete. Archives saved to: {archive_output_dir}")
+        
+        # Clean up batch directories
+        print("🧹 Cleaning up batch directories...")
+        for batch_dir in batch_dirs:
+            import shutil
+            shutil.rmtree(batch_dir)
+        print("✅ Cleanup complete")

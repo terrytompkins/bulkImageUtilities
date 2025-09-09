@@ -1,8 +1,20 @@
+# Core dependencies for image processing
 boto3>=1.26.0
 botocore>=1.29.0
 pillow>=11.3.0  # For AVIF/WebP support, use Pillow 12.0.0+ and install libavif
-# Note: Pillow 12.0.0+ may not be available for Python 3.13+ yet. Use 11.3.0+ as fallback.
+# Note: Pillow 12.0.0+ may not be available for Python 3.13+ yet. Use 11.3.0+ as fallback
 numpy>=1.21.0  # For image array operations
 opencv-python>=4.8.0  # For image processing and feature extraction
 scikit-learn>=1.3.0  # For clustering and similarity calculations
-# For best AVIF results, also install avifenc (libavif-tools) 
+
+# Enhanced PNG compression dependencies
+# Note: These are Python packages that provide Python bindings for the compression tools
+# The actual compression tools (oxipng, zopflipng, pngcrush, zstd, 7z, pigz) need to be installed separately
+
+# For best AVIF results, also install avifenc (libavif-tools)
+
+# Optional: Additional packages for enhanced functionality
+# These are not strictly required but provide additional features
+# matplotlib>=3.5.0  # For visualization (uncomment if needed)
+# pandas>=1.5.0  # For data analysis (uncomment if needed)
+# seaborn>=0.11.0  # For statistical visualization (uncomment if needed) 
