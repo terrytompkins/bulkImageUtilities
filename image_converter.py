@@ -408,12 +408,12 @@ def compress_png_with_oxipng(png_path, effort_level=4, strip_metadata=True):
     }
     
     try:
-        cmd = ["oxipng", f"-o{effort_level}", "-T", "0"]
+        cmd = ["oxipng", f"-o{effort_level}", "--threads", "0"]
         if strip_metadata:
             cmd.extend(["--strip", "safe"])
         cmd.extend(["-r", str(png_path)])
         
-        process = subprocess.run(cmd, capture_output=True, text=True)
+        process = subprocess.run(cmd, capture_output=True, text=True, timeout=300)  # 5 minute timeout per file
         result["end_time"] = datetime.utcnow().isoformat()
         
         if process.returncode == 0:
@@ -583,17 +583,19 @@ def create_archive_with_zstd(source_dir, output_path, compression_level=9, long_
     
     try:
         # Build zstd command
-        zstd_cmd = f"zstd -T0 -{compression_level}"
-        if long_range:
-            zstd_cmd += " --long=27"
+        zstd_path = which("zstd")
+        if not zstd_path:
+            return {"success": False, "error": "zstd not found in PATH"}
+        
+        zstd_cmd = f"{zstd_path} -{compression_level}"
         if ultra:
             zstd_cmd += " --ultra"
         if dictionary_path:
             zstd_cmd += f" --dict={dictionary_path}"
         
-        cmd = ["tar", "-I", zstd_cmd, "-cvf", str(output_path), str(source_dir)]
+        cmd = f"tar -cf - {source_dir} | {zstd_cmd} > {output_path}"
         
-        process = subprocess.run(cmd, capture_output=True, text=True)
+        process = subprocess.run(cmd, shell=True, capture_output=True, text=True)
         result["end_time"] = datetime.utcnow().isoformat()
         
         if process.returncode == 0:
@@ -629,7 +631,9 @@ def create_archive_with_7z(source_dir, output_path, compression_level=7, solid=T
     if not which("7z"):
         return {"success": False, "error": "7z not found in PATH"}
     
-    source_size = sum(f.stat().st_size for f in source_dir.rglob('*') if f.is_file())
+    # Get all PNG files in the source directory
+    png_files = list(source_dir.glob("*.png"))
+    source_size = sum(f.stat().st_size for f in png_files)
     result = {
         "tool": "7z",
         "source_size": source_size,
@@ -646,7 +650,13 @@ def create_archive_with_7z(source_dir, output_path, compression_level=7, solid=T
             cmd.append("-ms=on")
         if multithread:
             cmd.append("-mmt=on")
-        cmd.extend([str(output_path), str(source_dir)])
+        
+        if png_files:
+            cmd.extend([str(output_path)] + [str(f) for f in png_files])
+        else:
+            cmd.extend([str(output_path), "*"])
+        
+
         
         process = subprocess.run(cmd, capture_output=True, text=True)
         result["end_time"] = datetime.utcnow().isoformat()
@@ -760,7 +770,7 @@ def create_batches(source_dir, target_size_mb=300, output_dir=None):
             for file_path in current_batch:
                 dest_path = batch_dir / file_path.name
                 import shutil
-                shutil.move(str(file_path), str(dest_path))
+                shutil.copy2(str(file_path), str(dest_path))
             
             batches.append(batch_dir)
             batch_num += 1
@@ -778,7 +788,7 @@ def create_batches(source_dir, target_size_mb=300, output_dir=None):
         for file_path in current_batch:
             dest_path = batch_dir / file_path.name
             import shutil
-            shutil.move(str(file_path), str(dest_path))
+            shutil.copy2(str(file_path), str(dest_path))
         
         batches.append(batch_dir)
     
@@ -809,8 +819,15 @@ def process_image_png(png_path_str, dest_dir_str, compression_level):
 
     row["conversion_start"] = datetime.utcnow().isoformat()
     try:
-        img = Image.open(png_path)
-        img.save(compressed_png_path, format="PNG", compress_level=compression_level)
+        if compression_level == 0:
+            # For compression level 0, just copy the file without re-encoding
+            import shutil
+            shutil.copy2(png_path, compressed_png_path)
+        else:
+            # For other compression levels, re-encode with Pillow
+            img = Image.open(png_path)
+            img.save(compressed_png_path, format="PNG", compress_level=compression_level)
+        
         row["conversion_success"] = True
         row["target_size_bytes"] = compressed_png_path.stat().st_size
         row["compression_ratio"] = f"{row['target_size_bytes'] / row['png_size_bytes']:.4f}"
@@ -995,6 +1012,7 @@ def process_png_compression_parallel(source_dir, compression_tool="oxipng", effo
         return []
     
     print(f"🧵 Starting parallel PNG compression with {compression_tool}...")
+    print(f"📁 Found {len(png_files)} PNG files to process")
     
     results = []
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
@@ -1008,7 +1026,15 @@ def process_png_compression_parallel(source_dir, compression_tool="oxipng", effo
             print(f"Unknown compression tool: {compression_tool}")
             return []
         
+        # Add progress monitoring
+        completed = 0
+        total = len(futures)
+        print(f"🔄 Processing {total} files with {max_workers} workers...")
+        
         for future in as_completed(futures):
+            completed += 1
+            if completed % 100 == 0 or completed == total:
+                print(f"📊 Progress: {completed}/{total} files processed ({completed/total*100:.1f}%)")
             results.append(future.result())
     
     # Save report if requested
@@ -1253,6 +1279,7 @@ if __name__ == "__main__":
         action="store_true",
         help="Create compressed archives after image processing"
     )
+
     parser.add_argument(
         "--archive-tool",
         choices=["zstd", "7z", "pigz"],
@@ -1429,9 +1456,24 @@ if __name__ == "__main__":
                 json.dump(filtering_report, f, indent=2, default=str)
             print(f"📊 Filtering report saved to: {filtering_report_path}")
         
-        # Process PNG compression with advanced tools
+        # First, copy all PNG files from source to destination
+        print("📁 Copying PNG files from source to destination...")
+        dest_path = Path(args.dest_dir)
+        dest_path.mkdir(parents=True, exist_ok=True)
+        
+        png_files = list(source_path.glob("*.png"))
+        copied_count = 0
+        for png_file in png_files:
+            dest_file = dest_path / png_file.name
+            import shutil
+            shutil.copy2(png_file, dest_file)
+            copied_count += 1
+        
+        print(f"✅ Copied {copied_count} PNG files to: {args.dest_dir}")
+        
+        # Process PNG compression with advanced tools on destination files
         compression_results = process_png_compression_parallel(
-            source_path,
+            dest_path,
             args.png_compression_tool,
             args.png_effort_level,
             args.max_workers,
@@ -1441,12 +1483,17 @@ if __name__ == "__main__":
         # Create basic CSV report for compatibility
         report_dir = Path(args.report_csv).parent
         report_dir.mkdir(parents=True, exist_ok=True)
+        
+        print(f"📊 Writing CSV report with {len(compression_results)} results...")
+        successful_count = sum(1 for r in compression_results if r.get("success", False))
+        print(f"📊 Successful compressions: {successful_count}/{len(compression_results)}")
+        
         with open(args.report_csv, mode="w", newline="") as csvfile:
             fieldnames = ["filename", "original_size", "compressed_size", "compression_ratio", "tool", "success", "error"]
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
             for result in compression_results:
-                if result["success"]:
+                if result.get("success", False):
                     writer.writerow({
                         "filename": Path(result["filename"]).name,
                         "original_size": result["original_size"],
@@ -1455,6 +1502,17 @@ if __name__ == "__main__":
                         "tool": result["tool"],
                         "success": result["success"],
                         "error": result.get("error", "")
+                    })
+                else:
+                    # Write failed results too for debugging
+                    writer.writerow({
+                        "filename": Path(result.get("filename", "unknown")).name,
+                        "original_size": result.get("original_size", 0),
+                        "compressed_size": result.get("compressed_size", 0),
+                        "compression_ratio": "0.0000",
+                        "tool": result.get("tool", "unknown"),
+                        "success": result.get("success", False),
+                        "error": result.get("error", "Unknown error")
                     })
         
         print(f"✅ Image processing complete. Report written to: {args.report_csv}")
@@ -1479,17 +1537,29 @@ if __name__ == "__main__":
     if args.create_archives:
         print("\n📦 Step 2: Creating archives...")
         
-        # Determine source directory for archiving
-        if args.png_compression_tool != "pillow":
-            # If we used advanced compression, archive from source directory
-            archive_source = Path(args.source_dir)
-        else:
-            # If we used regular conversion, archive from destination directory
-            archive_source = Path(args.dest_dir)
+        # Ensure files are in destination directory for archiving
+        dest_path = Path(args.dest_dir)
+        dest_path.mkdir(parents=True, exist_ok=True)
+        
+        # Check if destination has PNG files
+        if not any(dest_path.glob("*.png")):
+            print("📁 Copying PNG files to destination for archiving...")
+            source_path = Path(args.source_dir)
+            png_files = list(source_path.glob("*.png"))
+            copied_count = 0
+            for png_file in png_files:
+                dest_file = dest_path / png_file.name
+                import shutil
+                shutil.copy2(png_file, dest_file)
+                copied_count += 1
+            print(f"✅ Copied {copied_count} PNG files to destination")
+        
+        # Always archive from destination directory
+        archive_source = dest_path
         
         # Create batches
         print(f"📁 Creating batches of ~{args.batch_size_mb} MB...")
-        batch_dirs = create_batches(archive_source, args.batch_size_mb)
+        batch_dirs = create_batches(archive_source, args.batch_size_mb, archive_source / "batches")
         print(f"✅ Created {len(batch_dirs)} batches")
         
         # Determine archive output directory
