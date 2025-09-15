@@ -15,6 +15,12 @@ This directory contains tools for filtering and analyzing images in bulk, specif
 
 ## Quick Start
 
+### 1. Install Dependencies
+```bash
+pip install -r requirements.txt
+```
+
+### 2. Use the Tools
 1. **Filter Images**: Use `image_filter.py` to analyze and filter your image collection
 2. **Review Results**: Use `image_viewer.py` to visually inspect the filtering results
 3. **Iterate**: Adjust filtering parameters based on visual feedback

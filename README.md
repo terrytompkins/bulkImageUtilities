@@ -99,7 +99,7 @@ streamlit run image_viewer.py  # Visual review of results
 Each tool category has its own requirements file:
 
 - **image-converters**: Pillow, OpenCV, scikit-learn, Jupyter
-- **image-filtering**: OpenCV, NumPy, Streamlit, Pandas
+- **image-filtering**: OpenCV, NumPy, Streamlit, Pandas, Pillow
 - **image-uploaders**: Boto3, Streamlit, Matplotlib
 
 External tools may be required (see individual README files for details):
