@@ -1,0 +1,24 @@
+# Image Conversion Tools Dependencies
+
+# Core image processing
+pillow>=11.3.0  # For AVIF/WebP support, use Pillow 12.0.0+ and install libavif
+numpy>=1.21.0  # For image array operations
+opencv-python>=4.8.0  # For image processing and feature extraction
+
+# Machine learning for similarity analysis
+scikit-learn>=1.3.0  # For clustering and similarity calculations
+
+# Jupyter notebook support
+jupyter>=1.0.0
+ipykernel>=6.0.0
+
+# Note: External compression tools required (install separately):
+# - oxipng (for PNG optimization)
+# - zopflipng (for PNG optimization) 
+# - pngcrush (for PNG optimization)
+# - zstd (for compression)
+# - 7z (for archiving)
+# - pigz (for gzip compression)
+# - avifenc (for AVIF encoding - libavif-tools)
+
+# See INSTALL_COMPRESSION_TOOLS.md for installation instructions

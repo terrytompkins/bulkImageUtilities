@@ -1,0 +1,18 @@
+# Image Upload Tools Dependencies
+
+# Core dependencies for S3 upload benchmarking
+boto3>=1.26.0
+botocore>=1.29.0
+
+# Streamlit for upload time calculator app
+streamlit>=1.32.0
+
+# Data processing and visualization
+numpy>=1.21.0
+pandas>=1.5.0
+matplotlib>=3.5.0
+
+# Note: External tools required (install separately):
+# - AWS CLI v2 (for awscli_sync method)
+# - s5cmd (for s5cmd_cp method) 
+# - curl >=7.65 (for presigned URL uploads)
