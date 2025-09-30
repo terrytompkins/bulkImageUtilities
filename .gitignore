@@ -49,3 +49,6 @@ tests/output/
 
 # CSV reports and analysis outputs
 *.csv
+
+# Sample data and test artifacts
+sample-data/

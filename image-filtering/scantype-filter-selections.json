@@ -1,0 +1,68 @@
+{
+  "composite_mappings": {
+    "c_uvX2_bl": ["bfvloff", "fluvX2", "flbl"],
+    "c_uvX2_blX20": ["bfvloff", "fluvX2", "flblX20"],
+    "c_uvX5_blX15": ["bfvloff", "fluvX5", "flblX15"],
+    "c_uv2_bl": ["bfvloff", "fluv2", "flbl"],
+    "c_uv5_bl": ["bfvloff", "fluv5", "flbl"],
+    "c_uv2_blX2": ["bfvloff", "fluv2", "flblX2"],
+    "c_uv_blX4": ["bfvloff", "fluv", "flblX4"],
+    "c_vloff_blX20": ["bfvloff", "flblX20"]
+  },
+  "selection_filters": {
+    "native_scantypes": {
+      "bfvloff": true,
+      "fluv": true,
+      "fluvX2": true,
+      "fluvX5": true,
+      "fluv2": true,
+      "fluv5": true,
+      "flbl": true,
+      "flblX2": true,
+      "flblX4": true,
+      "flblX15": true,
+      "flblX20": true
+    },
+    "composite_scantypes": {
+      "c_uvX2_bl": true,
+      "c_uvX2_blX20": true,
+      "c_uvX5_blX15": true,
+      "c_uv2_bl": true,
+      "c_uv5_bl": true,
+      "c_uv2_blX2": true,
+      "c_uv_blX4": true,
+      "c_vloff_blX20": true
+    }
+  },
+  "filename_mappings": {
+    "bfvloff": "bfvio-off",
+    "fluv": "fluv",
+    "fluvX2": "fluvX2",
+    "fluvX5": "fluvX5",
+    "fluv2": "fluv2",
+    "fluv5": "fluv5",
+    "flbl": "flblu",
+    "flblX2": "flbluX2",
+    "flblX4": "flbluX4",
+    "flblX15": "flbluX15",
+    "flblX20": "flbluX20"
+  },
+  "filter_field_groups": {
+        "illumination_methods": {
+            "algo_key": "ILLUMINATION_MODE",
+            "allowed_values": ["bright_field","flourescent"]
+        },
+        "illumination_colors": {
+            "algo_key": "LED_COLOR",
+            "allowed_values": ["red","green","blue","uv"]
+        },
+        "z_offset_modes": {
+            "algo_key": "Z_OFFSET_MODE",
+            "allowed_values": ["nominal", "off", "large_object"]
+        },
+        "exposure_multipliers": {
+            "algo_key": "EXPOSURE_MULTIPLIER",
+            "allowed_values": ["0.2", "0.5", "1.0", "2.0", "4.0", "5.0", "10.0", "15.0", "20.0"]
+        }
+    }
+}

@@ -27,7 +27,8 @@ import time
 import csv
 import sys
 import os
-from typing import Dict, Tuple, Optional
+import json
+from typing import Dict, Tuple, Optional, List, Any
 import concurrent.futures
 
 import cv2
@@ -184,14 +185,132 @@ def summarize(rows: list[Dict[str, object]]) -> Dict[str, int]:
     return {"total": total, "included": included, "excluded": excluded, "errors": errors}
 
 
+def load_algorithm_dev_json(input_dir: Path) -> Dict[str, Any]:
+    """
+    Load and parse algorithm_dev.json file with detailed error handling.
+    Returns the parsed JSON data.
+    Raises SystemExit with detailed error information if parsing fails.
+    """
+    algorithm_file = input_dir / "images" / "algo_dev_imageset" / "algorithm_dev.json"
+    
+    if not algorithm_file.exists():
+        print(f"[ERROR] algorithm_dev.json not found in {algorithm_file}", file=sys.stderr)
+        raise SystemExit(3)
+    
+    try:
+        with algorithm_file.open('r', encoding='utf-8') as f:
+            data = json.load(f)
+        return data
+    except json.JSONDecodeError as e:
+        print(f"[ERROR] Malformed JSON in algorithm_dev.json:", file=sys.stderr)
+        print(f"  Error: {e.msg}", file=sys.stderr)
+        print(f"  Line: {e.lineno}, Column: {e.colno}", file=sys.stderr)
+        print(f"  Position: {e.pos}", file=sys.stderr)
+        raise SystemExit(4)
+    except Exception as e:
+        print(f"[ERROR] Failed to read algorithm_dev.json: {e}", file=sys.stderr)
+        raise SystemExit(5)
+
+
+def extract_image_metadata(algorithm_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Extract image metadata from algorithm_dev.json data.
+    Returns a list of dictionaries containing image information.
+    """
+    images = []
+    
+    # Look for image data in the JSON structure
+    # The structure might vary, so we'll search for objects with FILENAME
+    def find_images_recursive(obj, path=""):
+        if isinstance(obj, dict):
+            if "FILENAME" in obj:
+                # This looks like an image record
+                image_info = {
+                    "filename": obj.get("FILENAME", ""),
+                    "illumination_mode": obj.get("ILLUMINATION_MODE", ""),
+                    "led_color": obj.get("LED_COLOR", ""),
+                    "z_offset_mode": obj.get("Z_OFFSET_MODE", ""),
+                    "exposure_multiplier": obj.get("EXPOSURE_MULTIPLIER", ""),
+                }
+                images.append(image_info)
+            else:
+                # Recursively search nested objects
+                for key, value in obj.items():
+                    find_images_recursive(value, f"{path}.{key}" if path else key)
+        elif isinstance(obj, list):
+            # Search through lists
+            for i, item in enumerate(obj):
+                find_images_recursive(item, f"{path}[{i}]")
+    
+    find_images_recursive(algorithm_data)
+    
+    if not images:
+        print("[ERROR] No image records found in algorithm_dev.json", file=sys.stderr)
+        raise SystemExit(6)
+    
+    return images
+
+
+def get_file_size_with_handling(filename: str, input_dir: Path) -> Tuple[int, str]:
+    """
+    Get file size for an image file, handling missing files.
+    Returns: (file_size_bytes, comments)
+    """
+    # Extract just the filename from the full path
+    image_filename = Path(filename).name
+    image_path = input_dir / "images" / "raw_imageset" / image_filename
+    
+    if not image_path.exists():
+        return 0, "file_missing"
+    
+    try:
+        return image_path.stat().st_size, ""
+    except OSError as e:
+        return 0, f"access_error:{e}"
+
+
+def write_scantypes_csv(images: List[Dict[str, Any]], input_dir: Path, csv_path: Path) -> None:
+    """
+    Write scantypes analysis CSV with file size information.
+    """
+    fieldnames = ["FILENAME", "ILLUMINATION_MODE", "LED_COLOR", "Z_OFFSET_MODE", "EXPOSURE_MULTIPLIER", "IMAGE_SIZE", "COMMENTS"]
+    
+    with csv_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        
+        total_images = len(images)
+        for i, image in enumerate(images):
+            # Get file size
+            file_size, comments = get_file_size_with_handling(image["filename"], input_dir)
+            
+            # Write row
+            row = {
+                "FILENAME": image["filename"],
+                "ILLUMINATION_MODE": image["illumination_mode"],
+                "LED_COLOR": image["led_color"],
+                "Z_OFFSET_MODE": image["z_offset_mode"],
+                "EXPOSURE_MULTIPLIER": image["exposure_multiplier"],
+                "IMAGE_SIZE": file_size,
+                "COMMENTS": comments
+            }
+            writer.writerow(row)
+            
+            # Progress reporting every 100 files
+            if (i + 1) % 100 == 0:
+                print(f"Processed {i + 1}/{total_images} images...")
+    
+    print(f"Completed processing {total_images} images.")
+
+
 def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Analyze images with simple filters (focus or brightness) and emit CSV report."
     )
     p.add_argument("--input-dir", required=True, type=Path, help="Folder containing images")
     p.add_argument("--output-csv", required=True, type=Path, help="Where to write the CSV report")
-    p.add_argument("--algorithm", choices=["focus", "brightness", "all"], required=True,
-                   help="Which filter to use: focus (variance of Laplacian), brightness (mean + saturation), or all (both must pass)")
+    p.add_argument("--algorithm", choices=["focus", "brightness", "all", "scantypes"], required=True,
+                   help="Which filter to use: focus (variance of Laplacian), brightness (mean + saturation), all (both must pass), or scantypes (analyze scan type groupings)")
 
     # Focus params
     p.add_argument("--focus-threshold", type=float, default=120.0,
@@ -226,6 +345,10 @@ def main(argv=None) -> int:
         print(f"[ERROR] --input-dir does not exist or is not a directory: {args.input_dir}", file=sys.stderr)
         return 2
 
+    # Handle scantypes algorithm separately
+    if args.algorithm == "scantypes":
+        return handle_scantypes_algorithm(args)
+
     imgs = list_images(args.input_dir, args.recursive)
     if not imgs:
         print(f"[WARN] No images found in {args.input_dir} (recursive={args.recursive}). Extensions: {sorted(IMAGE_EXTS)}")
@@ -259,6 +382,47 @@ def main(argv=None) -> int:
     print(f"Elapsed seconds:  {elapsed:.2f}")
 
     return 0
+
+
+def handle_scantypes_algorithm(args: argparse.Namespace) -> int:
+    """
+    Handle the scantypes algorithm: analyze scan type groupings from algorithm_dev.json
+    """
+    print("=== Scantypes Analysis ===")
+    print(f"Input directory: {args.input_dir}")
+    print(f"Output CSV: {args.output_csv}")
+    
+    start = time.perf_counter()
+    
+    try:
+        # Load and parse algorithm_dev.json
+        print("Loading algorithm_dev.json...")
+        algorithm_data = load_algorithm_dev_json(args.input_dir)
+        
+        # Extract image metadata
+        print("Extracting image metadata...")
+        images = extract_image_metadata(algorithm_data)
+        print(f"Found {len(images)} image records")
+        
+        # Write scantypes CSV
+        print("Generating scantypes CSV...")
+        write_scantypes_csv(images, args.input_dir, args.output_csv)
+        
+        elapsed = time.perf_counter() - start
+        
+        # Summary
+        print("=== Scantypes Analysis Summary ===")
+        print(f"Total image records: {len(images)}")
+        print(f"Output file: {args.output_csv}")
+        print(f"Elapsed seconds: {elapsed:.2f}")
+        
+        return 0
+        
+    except SystemExit as e:
+        return e.code
+    except Exception as e:
+        print(f"[ERROR] Unexpected error in scantypes analysis: {e}", file=sys.stderr)
+        return 7
 
 
 if __name__ == "__main__":

@@ -1,0 +1,255 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Algorithm Development JSON Schema",
+  "description": "Schema for algorithm_dev.json files used in inVueDx image studies",
+  "type": "object",
+  "required": ["IMAGES"],
+  "properties": {
+    "ACCESSION_ID": {
+      "type": "string",
+      "description": "Unique accession identifier for the study"
+    },
+    "RUN_UUID": {
+      "type": "string",
+      "description": "Unique run identifier (UUID format)"
+    },
+    "RUN_START_DATETIME": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp when the run started"
+    },
+    "INSTRUMENT_TYPE": {
+      "type": "string",
+      "description": "Type of instrument used (e.g., 'invue-dx')"
+    },
+    "INSTRUMENT_ID": {
+      "type": "string",
+      "description": "Unique identifier of the specific instrument"
+    },
+    "INST_SW_VERSION": {
+      "type": "string",
+      "description": "Software version of the instrument"
+    },
+    "XILINX_LINUX_VERSION": {
+      "type": "string",
+      "description": "Linux version running on Xilinx hardware"
+    },
+    "PATIENT_ID": {
+      "type": "string",
+      "description": "Unique patient identifier"
+    },
+    "PATIENT_NAME": {
+      "type": "string",
+      "description": "Name of the patient"
+    },
+    "SPECIES": {
+      "type": "string",
+      "description": "Species of the patient (e.g., 'Canine', 'Feline')"
+    },
+    "PATIENT_SEX": {
+      "type": "string",
+      "description": "Sex of the patient"
+    },
+    "LIFESTAGE": {
+      "type": "string",
+      "description": "Life stage of the patient"
+    },
+    "PATIENT_LIFESTAGE": {
+      "type": "string",
+      "description": "Detailed life stage information"
+    },
+    "PATIENT_AGE": {
+      "type": "number",
+      "description": "Age of the patient in years"
+    },
+    "PATIENT_DOB": {
+      "type": "string",
+      "format": "date",
+      "description": "Date of birth of the patient"
+    },
+    "AGE_IS_APPROXIMATE": {
+      "type": "boolean",
+      "description": "Whether the age is approximate"
+    },
+    "SENDER": {
+      "type": "string",
+      "description": "System that sent the data"
+    },
+    "SENDER_SERIAL_NUMBER": {
+      "type": "string",
+      "description": "Serial number of the sending system"
+    },
+    "SENDER_SOFTWARE_VERSION": {
+      "type": "string",
+      "description": "Software version of the sending system"
+    },
+    "RUN_TYPE": {
+      "type": "string",
+      "description": "Type of run (e.g., 'FNA')"
+    },
+    "CLINICAL_SIGNS": {
+      "type": "object",
+      "description": "Clinical signs and patient information",
+      "properties": {
+        "RUN_SAMPLE_SOURCE": {"type": "string"},
+        "RUN_SAMPLE_LOCATION": {"type": "string"},
+        "RUN_SAMPLE_SITE": {"type": "string"},
+        "RUN_SAMPLE_SUB_SITE": {"type": "string"},
+        "RUN_SAMPLE_TYPE": {"type": "string"},
+        "LESION_DISTRIBUTION": {"type": ["string", "null"]},
+        "LESION_SIZE": {"type": ["string", "null"]},
+        "LESION_SIZE_UNIT": {"type": ["string", "null"]},
+        "LESION_SIZE_QUALIFIER": {"type": ["string", "null"]},
+        "LESION_DURATION": {"type": ["string", "null"]},
+        "LESION_GROWTH_RATE": {"type": ["string", "null"]},
+        "LESION_APPEARANCE": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "LESION_ASPIRATE_APPEARANCE": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "LESION_BOTHERING": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "LESION_RECURRENT": {"type": ["string", "null"]},
+        "LESION_SIZE_CHANGING": {"type": ["string", "null"]},
+        "LESION_SIMILAR_PRESENT": {"type": ["string", "null"]},
+        "LESION_SWELLING": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "LESION_DISCHARGE": {"type": ["string", "null"]},
+        "SYMPTOMS": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "TREATMENT_ANTIBIOTICS": {"type": ["string", "null"]},
+        "TREATMENT_OTHER": {"type": ["string", "null"]},
+        "TREATMENT_STEROIDS": {"type": ["string", "null"]},
+        "TREATMENT_CHEMO": {"type": ["string", "null"]},
+        "CLINICAL_HISTORY": {"type": ["string", "null"]},
+        "RECENT_VACCINATION": {"type": ["string", "null"]},
+        "RECENT_NEOPLASIA": {"type": ["string", "null"]},
+        "RECENT_NEOPLASIA_DESCRIPTION": {"type": ["string", "null"]},
+        "RECENT_INFECTION": {"type": ["string", "null"]},
+        "RECENT_SURGERY": {"type": ["string", "null"]},
+        "RECENT_SURGERY_DESCRIPTION": {"type": ["string", "null"]},
+        "RECENT_TRAVEL": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "LIVING_LOCATION": {"type": ["string", "null"]},
+        "RECENT_TRAUMA": {"type": ["string", "null"]},
+        "HISTORY_SKIN_DISEASE": {"type": ["string", "null"]},
+        "RECENT_FELV": {"type": ["string", "null"]},
+        "RECENT_FIV": {"type": ["string", "null"]},
+        "RECENT_4DX": {"type": ["string", "null"]}
+      }
+    },
+    "IMAGES": {
+      "type": "array",
+      "description": "Array of image metadata objects",
+      "items": {
+        "type": "object",
+        "required": ["FILENAME", "ILLUMINATION_MODE", "LED_COLOR", "Z_OFFSET_MODE", "EXPOSURE_MULTIPLIER"],
+        "properties": {
+          "FILENAME": {
+            "type": "string",
+            "description": "Relative path to the image file from the study root"
+          },
+          "ACQUISITION_DATETIME": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp when the image was acquired"
+          },
+          "IMAGE_WIDTH": {
+            "type": "integer",
+            "description": "Width of the image in pixels"
+          },
+          "IMAGE_HEIGHT": {
+            "type": "integer",
+            "description": "Height of the image in pixels"
+          },
+          "IMAGE_BITDEPTH": {
+            "type": "integer",
+            "description": "Bit depth of the image"
+          },
+          "IMAGE_ID": {
+            "type": "string",
+            "description": "Unique identifier for the image"
+          },
+          "SCAN_TYPE": {
+            "type": "string",
+            "description": "Type of scan performed"
+          },
+          "CHANNEL": {
+            "type": "string",
+            "description": "Image channel identifier"
+          },
+          "GAIN": {
+            "type": "number",
+            "description": "Gain setting used for acquisition"
+          },
+          "IMAGE_TYPE": {
+            "type": "string",
+            "description": "Type of image (e.g., 'Microscopic raw')"
+          },
+          "ROLE": {
+            "type": "string",
+            "description": "Role of the image in the study"
+          },
+          "ILLUMINATION_MODE": {
+            "type": "string",
+            "enum": ["bright_field", "fluorescent"],
+            "description": "Illumination method used (key field for scan type filtering)"
+          },
+          "LED_COLOR": {
+            "type": "string",
+            "enum": ["red", "green", "blue", "uv", "violet"],
+            "description": "Color of LED used for illumination (key field for scan type filtering)"
+          },
+          "EXPOSURE_MULTIPLIER": {
+            "type": "number",
+            "description": "Exposure multiplier setting (key field for scan type filtering)"
+          },
+          "Z_OFFSET_MODE": {
+            "type": "string",
+            "enum": ["nominal", "off", "large_object"],
+            "description": "Z-axis offset mode (key field for scan type filtering)"
+          },
+          "SAMPLE_CHAMBER": {
+            "type": "string",
+            "description": "Sample chamber identifier"
+          },
+          "FIELD_XI": {
+            "type": "integer",
+            "description": "X coordinate of the field"
+          },
+          "FIELD_YI": {
+            "type": "integer",
+            "description": "Y coordinate of the field"
+          },
+          "FIELD_ID": {
+            "type": "string",
+            "description": "Unique field identifier"
+          },
+          "X_POSITION": {
+            "type": "number",
+            "description": "X position in micrometers"
+          },
+          "Y_POSITION": {
+            "type": "number",
+            "description": "Y position in micrometers"
+          },
+          "Z_OFFSET": {
+            "type": "number",
+            "description": "Z offset in micrometers"
+          }
+        }
+      }
+    }
+  }
+}

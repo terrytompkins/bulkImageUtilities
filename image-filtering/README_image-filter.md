@@ -62,6 +62,29 @@ python image_filter.py \
   --saturation-pct-limit 2.0
 ```
 
+### 4. Scan Type Analysis
+
+Analyze scan type groupings from algorithm_dev.json metadata:
+
+```bash
+python image_filter.py \
+  --input-dir /path/to/study \
+  --output-csv /path/to/scantype_report.csv \
+  --algorithm scantypes
+```
+
+**Note**: The scantypes algorithm requires a study directory with the following structure:
+```
+study_directory/
+├── images/
+│   ├── algo_dev_imageset/
+│   │   └── algorithm_dev.json    # Image metadata
+│   └── raw_imageset/             # Actual image files
+│       ├── image1.png
+│       ├── image2.png
+│       └── ...
+```
+
 ## Command Line Options
 
 ### Required Arguments
@@ -70,7 +93,7 @@ python image_filter.py \
 |--------|-------------|
 | `--input-dir` | Directory containing images to analyze |
 | `--output-csv` | Path where the CSV report will be written |
-| `--algorithm` | Filtering algorithm: `focus`, `brightness`, or `all` |
+| `--algorithm` | Filtering algorithm: `focus`, `brightness`, `all`, or `scantypes` |
 
 ### Focus Filter Options
 
@@ -98,6 +121,8 @@ python image_filter.py \
 
 ## Output Format
 
+### Standard Algorithms (focus, brightness, all)
+
 The CSV report contains the following columns:
 
 - **filename**: Name of the image file
@@ -107,6 +132,23 @@ The CSV report contains the following columns:
 - **dark_pct**: Percentage of dark pixels
 - **bright_pct**: Percentage of bright pixels
 - **reason**: Explanation of why the image was included or excluded
+
+### Scan Type Analysis (scantypes)
+
+The CSV report contains the following columns:
+
+- **FILENAME**: Relative path to the image file
+- **ILLUMINATION_MODE**: Illumination method (`bright_field` or `fluorescent`)
+- **LED_COLOR**: LED color used (`red`, `green`, `blue`, `uv`, `violet`)
+- **Z_OFFSET_MODE**: Z-axis offset mode (`nominal`, `off`, `large_object`)
+- **EXPOSURE_MULTIPLIER**: Exposure multiplier setting (numeric value)
+- **IMAGE_SIZE**: File size in bytes
+- **COMMENTS**: Additional notes (empty if file found, "file_missing" if not found)
+
+This format allows users to:
+1. Load the CSV into Excel or other spreadsheet tools
+2. Filter by the four key fields to analyze different scan type combinations
+3. Sum the IMAGE_SIZE column to get aggregate file sizes for each grouping
 
 ## Algorithm Details
 
@@ -132,9 +174,61 @@ The CSV report contains the following columns:
 - Adjust `--workers` based on your system's CPU cores
 - Use `--recursive` only when needed to avoid processing unnecessary subdirectories
 
+## Algorithm Development JSON Structure
+
+The `scantypes` algorithm requires an `algorithm_dev.json` file that contains metadata about all images in the study. This file follows a specific structure:
+
+### File Location
+```
+study_directory/
+└── images/
+    └── algo_dev_imageset/
+        └── algorithm_dev.json
+```
+
+### Key Structure Elements
+
+The JSON file contains:
+
+1. **Study Metadata**: Patient information, instrument details, run parameters
+2. **Clinical Signs**: Clinical information about the patient and sample
+3. **IMAGES Array**: The main data structure containing image metadata
+
+### Image Metadata Fields
+
+Each image in the `IMAGES` array contains these key fields for scan type analysis:
+
+| Field | Type | Description | Example Values |
+|-------|------|-------------|----------------|
+| `FILENAME` | string | Relative path to image file | `"images/raw_imageset/image.png"` |
+| `ILLUMINATION_MODE` | string | Illumination method | `"bright_field"`, `"fluorescent"` |
+| `LED_COLOR` | string | LED color used | `"red"`, `"green"`, `"blue"`, `"uv"`, `"violet"` |
+| `Z_OFFSET_MODE` | string | Z-axis offset mode | `"nominal"`, `"off"`, `"large_object"` |
+| `EXPOSURE_MULTIPLIER` | number | Exposure multiplier setting | `1.0`, `2.0`, `5.0`, `10.0` |
+
+### Additional Image Fields
+
+Each image also contains technical metadata:
+
+- `ACQUISITION_DATETIME`: ISO 8601 timestamp
+- `IMAGE_WIDTH`, `IMAGE_HEIGHT`: Image dimensions in pixels
+- `IMAGE_BITDEPTH`: Bit depth of the image
+- `IMAGE_ID`: Unique identifier for the image
+- `SCAN_TYPE`: Type of scan performed
+- `CHANNEL`: Image channel identifier
+- `GAIN`: Gain setting used
+- `SAMPLE_CHAMBER`: Sample chamber identifier
+- `FIELD_XI`, `FIELD_YI`: Field coordinates
+- `X_POSITION`, `Y_POSITION`, `Z_OFFSET`: Physical positions in micrometers
+
+### JSON Schema
+
+A complete JSON schema is available in `algorithm_dev_schema.json` for validation and reference.
+
 ## Notes
 
 - The tool processes images in grayscale for efficiency
 - All metrics are calculated on resized images (if `--max-side` is used)
 - Processing time and file counts are displayed at completion
 - Supported image formats: JPG, JPEG, PNG, TIFF, TIFF, BMP, WebP
+- The scantypes algorithm automatically handles missing image files by reporting "file_missing" in the COMMENTS column
