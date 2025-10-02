@@ -138,6 +138,7 @@ The CSV report contains the following columns:
 The CSV report contains the following columns:
 
 - **FILENAME**: Relative path to the image file
+- **IMAGE_DIR**: Study directory name (contains instrument serial, timestamp, run type, and study UUID)
 - **ILLUMINATION_MODE**: Illumination method (`bright_field` or `fluorescent`)
 - **LED_COLOR**: LED color used (`red`, `green`, `blue`, `uv`, `violet`)
 - **Z_OFFSET_MODE**: Z-axis offset mode (`nominal`, `off`, `large_object`)

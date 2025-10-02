@@ -160,6 +160,10 @@
             "type": "string",
             "description": "Relative path to the image file from the study root"
           },
+          "IMAGE_DIR": {
+            "type": "string",
+            "description": "Study directory name containing instrument serial, timestamp, run type, and study UUID"
+          },
           "ACQUISITION_DATETIME": {
             "type": "string",
             "format": "date-time",

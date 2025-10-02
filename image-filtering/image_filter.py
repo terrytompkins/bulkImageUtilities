@@ -273,7 +273,9 @@ def write_scantypes_csv(images: List[Dict[str, Any]], input_dir: Path, csv_path:
     """
     Write scantypes analysis CSV with file size information.
     """
-    fieldnames = ["FILENAME", "ILLUMINATION_MODE", "LED_COLOR", "Z_OFFSET_MODE", "EXPOSURE_MULTIPLIER", "IMAGE_SIZE", "COMMENTS"]
+    # Extract the study directory name (parent of images/ folder)
+    study_dir_name = input_dir.name
+    fieldnames = ["FILENAME", "IMAGE_DIR", "ILLUMINATION_MODE", "LED_COLOR", "Z_OFFSET_MODE", "EXPOSURE_MULTIPLIER", "IMAGE_SIZE", "COMMENTS"]
     
     with csv_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -287,6 +289,7 @@ def write_scantypes_csv(images: List[Dict[str, Any]], input_dir: Path, csv_path:
             # Write row
             row = {
                 "FILENAME": image["filename"],
+                "IMAGE_DIR": study_dir_name,
                 "ILLUMINATION_MODE": image["illumination_mode"],
                 "LED_COLOR": image["led_color"],
                 "Z_OFFSET_MODE": image["z_offset_mode"],
