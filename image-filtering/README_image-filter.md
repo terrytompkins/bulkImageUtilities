@@ -27,7 +27,7 @@ Filter images based on sharpness/focus:
 
 ```bash
 python image_filter.py \
-  --input-dir /path/to/images \
+  --study-dir /path/to/study \
   --output-csv /path/to/report_focus.csv \
   --algorithm focus \
   --focus-threshold 120
@@ -39,7 +39,7 @@ Filter images based on brightness and saturation:
 
 ```bash
 python image_filter.py \
-  --input-dir /path/to/images \
+  --study-dir /path/to/study \
   --output-csv /path/to/report_brightness.csv \
   --algorithm brightness \
   --brightness-min 10 --brightness-max 245 \
@@ -47,15 +47,15 @@ python image_filter.py \
   --saturation-pct-limit 2.0
 ```
 
-### 3. Combined Filtering (Focus + Brightness)
+### 3. Combined Quality Filtering (Focus + Brightness)
 
 Require both focus and brightness criteria to pass:
 
 ```bash
 python image_filter.py \
-  --input-dir /path/to/images \
-  --output-csv /path/to/report_all.csv \
-  --algorithm all \
+  --study-dir /path/to/study \
+  --output-csv /path/to/report_quality.csv \
+  --algorithm focus+brightness \
   --focus-threshold 120 \
   --brightness-min 10 --brightness-max 245 \
   --dark-threshold 5 --bright-threshold 250 \
@@ -68,9 +68,37 @@ Analyze scan type groupings from algorithm_dev.json metadata:
 
 ```bash
 python image_filter.py \
-  --input-dir /path/to/study \
+  --study-dir /path/to/study \
   --output-csv /path/to/scantype_report.csv \
   --algorithm scantypes
+```
+
+### 5. Composite Analysis (Quality + Metadata)
+
+Find images that meet both quality criteria and specific scan type requirements:
+
+```bash
+# Focus + Scan Types
+python image_filter.py \
+  --study-dir /path/to/study \
+  --output-csv /path/to/focus_scantypes.csv \
+  --algorithm focus+scantypes \
+  --focus-threshold 120
+
+# Brightness + Scan Types  
+python image_filter.py \
+  --study-dir /path/to/study \
+  --output-csv /path/to/brightness_scantypes.csv \
+  --algorithm brightness+scantypes \
+  --brightness-min 10 --brightness-max 245
+
+# Complete Analysis (Focus + Brightness + Scan Types)
+python image_filter.py \
+  --study-dir /path/to/study \
+  --output-csv /path/to/complete_analysis.csv \
+  --algorithm all \
+  --focus-threshold 120 \
+  --brightness-min 10 --brightness-max 245
 ```
 
 **Note**: The scantypes algorithm requires a study directory with the following structure:
@@ -91,9 +119,9 @@ study_directory/
 
 | Option | Description |
 |--------|-------------|
-| `--input-dir` | Directory containing images to analyze |
+| `--study-dir` | Top-level study directory containing images/ and algorithm_dev.json |
 | `--output-csv` | Path where the CSV report will be written |
-| `--algorithm` | Filtering algorithm: `focus`, `brightness`, `all`, or `scantypes` |
+| `--algorithm` | Filtering algorithm: `focus`, `brightness`, `focus+brightness`, `scantypes`, `focus+scantypes`, `brightness+scantypes`, or `all` |
 
 ### Focus Filter Options
 
@@ -121,17 +149,35 @@ study_directory/
 
 ## Output Format
 
-### Standard Algorithms (focus, brightness, all)
+### Quality Analysis Algorithms (focus, brightness, focus+brightness)
 
-The CSV report contains the following columns:
+The CSV report contains different columns depending on the algorithm used:
 
+#### Focus Algorithm
 - **filename**: Name of the image file
-- **include**: Boolean indicating if the image passed all filters
-- **focus_variance**: Laplacian variance score (higher = sharper)
-- **mean_brightness**: Average pixel brightness (0-255)
-- **dark_pct**: Percentage of dark pixels
-- **bright_pct**: Percentage of bright pixels
+- **include**: Boolean indicating if the image passed the focus filter
+- **focus_score**: Laplacian variance score (higher = sharper)
 - **reason**: Explanation of why the image was included or excluded
+- **error**: Error message if image processing failed
+
+#### Brightness Algorithm
+- **filename**: Name of the image file
+- **include**: Boolean indicating if the image passed the brightness filter
+- **brightness_mean**: Average pixel brightness (0-255)
+- **pct_dark**: Percentage of dark pixels
+- **pct_bright**: Percentage of bright pixels
+- **reason**: Explanation of why the image was included or excluded
+- **error**: Error message if image processing failed
+
+#### Combined Quality Algorithm (focus+brightness)
+- **filename**: Name of the image file
+- **include**: Boolean indicating if the image passed both focus and brightness filters
+- **focus_score**: Laplacian variance score (higher = sharper)
+- **brightness_mean**: Average pixel brightness (0-255)
+- **pct_dark**: Percentage of dark pixels
+- **pct_bright**: Percentage of bright pixels
+- **reason**: Explanation of why the image was included or excluded
+- **error**: Error message if image processing failed
 
 ### Scan Type Analysis (scantypes)
 
@@ -151,6 +197,54 @@ This format allows users to:
 2. Filter by the four key fields to analyze different scan type combinations
 3. Sum the IMAGE_SIZE column to get aggregate file sizes for each grouping
 
+### Composite Analysis Algorithms (focus+scantypes, brightness+scantypes, all)
+
+Composite algorithms combine quality analysis with metadata analysis, providing both quality scores and scan type information:
+
+#### Focus + Scan Types (focus+scantypes)
+- **filename**: Name of the image file
+- **include**: Boolean indicating if the image passed the focus filter
+- **focus_score**: Laplacian variance score (higher = sharper)
+- **reason**: Explanation of why the image was included or excluded
+- **error**: Error message if image processing failed
+- **ILLUMINATION_MODE**: Illumination method (`bright_field` or `fluorescent`)
+- **LED_COLOR**: LED color used (`red`, `green`, `blue`, `uv`, `violet`)
+- **Z_OFFSET_MODE**: Z-axis offset mode (`nominal`, `off`, `large_object`)
+- **EXPOSURE_MULTIPLIER**: Exposure multiplier setting (numeric value)
+- **IMAGE_SIZE**: File size in bytes
+- **COMMENTS**: Additional notes (empty if file found, "file_missing" if not found)
+
+#### Brightness + Scan Types (brightness+scantypes)
+- **filename**: Name of the image file
+- **include**: Boolean indicating if the image passed the brightness filter
+- **brightness_mean**: Average pixel brightness (0-255)
+- **pct_dark**: Percentage of dark pixels
+- **pct_bright**: Percentage of bright pixels
+- **reason**: Explanation of why the image was included or excluded
+- **error**: Error message if image processing failed
+- **ILLUMINATION_MODE**: Illumination method (`bright_field` or `fluorescent`)
+- **LED_COLOR**: LED color used (`red`, `green`, `blue`, `uv`, `violet`)
+- **Z_OFFSET_MODE**: Z-axis offset mode (`nominal`, `off`, `large_object`)
+- **EXPOSURE_MULTIPLIER**: Exposure multiplier setting (numeric value)
+- **IMAGE_SIZE**: File size in bytes
+- **COMMENTS**: Additional notes (empty if file found, "file_missing" if not found)
+
+#### Complete Analysis (all)
+- **filename**: Name of the image file
+- **include**: Boolean indicating if the image passed both focus and brightness filters
+- **focus_score**: Laplacian variance score (higher = sharper)
+- **brightness_mean**: Average pixel brightness (0-255)
+- **pct_dark**: Percentage of dark pixels
+- **pct_bright**: Percentage of bright pixels
+- **reason**: Explanation of why the image was included or excluded
+- **error**: Error message if image processing failed
+- **ILLUMINATION_MODE**: Illumination method (`bright_field` or `fluorescent`)
+- **LED_COLOR**: LED color used (`red`, `green`, `blue`, `uv`, `violet`)
+- **Z_OFFSET_MODE**: Z-axis offset mode (`nominal`, `off`, `large_object`)
+- **EXPOSURE_MULTIPLIER**: Exposure multiplier setting (numeric value)
+- **IMAGE_SIZE**: File size in bytes
+- **COMMENTS**: Additional notes (empty if file found, "file_missing" if not found)
+
 ## Algorithm Details
 
 ### Focus Detection
@@ -165,9 +259,12 @@ This format allows users to:
   - Mean brightness within `[brightness_min, brightness_max]`
   - Saturated pixels (dark + bright) ≤ `saturation_pct_limit`
 
-### Combined Filtering
-- When using `--algorithm all`, images must pass **both** focus and brightness criteria
-- Useful for ensuring images meet quality standards for analysis
+### Composite Analysis
+- **focus+brightness**: Images must pass both focus and brightness criteria
+- **focus+scantypes**: Images must pass focus criteria AND have metadata analysis
+- **brightness+scantypes**: Images must pass brightness criteria AND have metadata analysis  
+- **all**: Images must pass both focus and brightness criteria AND have metadata analysis
+- Useful for identifying high-priority images that meet quality standards AND specific scan type requirements
 
 ## Performance Tips
 

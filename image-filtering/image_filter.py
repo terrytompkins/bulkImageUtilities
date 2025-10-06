@@ -127,6 +127,73 @@ def decide_include(
     return include, "; ".join(reason_parts) if reason_parts else ("pass" if include else "fail")
 
 
+def analyze_one_composite(img_path: Path, args: argparse.Namespace, metadata_map: Dict[str, Dict[str, Any]]) -> Dict[str, object]:
+    """
+    Analyze a single image for composite algorithms (includes both quality analysis and metadata).
+    """
+    out = {"filename": str(img_path.relative_to(args.study_dir / "images" / "raw_imageset"))}
+    
+    # Get metadata for this image
+    filename_key = out["filename"]
+    metadata = metadata_map.get(filename_key, {})
+    
+    # Add metadata fields
+    out["ILLUMINATION_MODE"] = metadata.get("illumination_mode", "")
+    out["LED_COLOR"] = metadata.get("led_color", "")
+    out["Z_OFFSET_MODE"] = metadata.get("z_offset_mode", "")
+    out["EXPOSURE_MULTIPLIER"] = metadata.get("exposure_multiplier", "")
+    
+    # Get file size
+    file_size, comments = get_file_size_with_handling(filename_key, args.study_dir)
+    out["IMAGE_SIZE"] = file_size
+    out["COMMENTS"] = comments
+    
+    # Perform quality analysis if requested
+    focus_val = brightness_mean = pct_dark = pct_bright = None
+    
+    try:
+        img = cv2.imread(str(img_path))
+        if img is None:
+            out["error"] = "unreadable"
+            return out
+        
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        
+        # Resize for performance if needed
+        if args.max_side > 0:
+            h, w = gray.shape
+            if max(h, w) > args.max_side:
+                scale = args.max_side / max(h, w)
+                new_w, new_h = int(w * scale), int(h * scale)
+                gray = cv2.resize(gray, (new_w, new_h))
+        
+        # Focus analysis
+        if "focus" in args.algorithm or args.algorithm == "all":
+            focus_val = focus_score_variance_of_laplacian(gray)
+            out["focus_score"] = round(focus_val, 4)
+        
+        # Brightness analysis
+        if "brightness" in args.algorithm or args.algorithm == "all":
+            brightness_mean, pct_dark, pct_bright = brightness_metrics(gray, args.dark_threshold, args.bright_threshold)
+            out["brightness_mean"] = round(brightness_mean, 4)
+            out["pct_dark"] = round(pct_dark, 4)
+            out["pct_bright"] = round(pct_bright, 4)
+        
+        # Determine inclusion based on quality criteria
+        include, reason = decide_include(
+            args.algorithm, focus_val, brightness_mean, pct_dark, pct_bright, args
+        )
+        out["include"] = include
+        out["reason"] = reason
+        
+    except Exception as e:
+        out["error"] = f"exception:{type(e).__name__}:{e}"
+        out["include"] = False
+        out["reason"] = "processing_error"
+    
+    return out
+
+
 def analyze_one(img_path: Path, args: argparse.Namespace) -> Dict[str, object]:
     out: Dict[str, object] = {
         "filename": str(img_path.name),
@@ -168,8 +235,66 @@ def analyze_one(img_path: Path, args: argparse.Namespace) -> Dict[str, object]:
         return out
 
 
-def write_csv(rows: list[Dict[str, object]], csv_path: Path) -> None:
-    fieldnames = ["filename", "include", "focus_score", "brightness_mean", "pct_dark", "pct_bright", "reason", "error"]
+def write_composite_csv(rows: list[Dict[str, object]], study_dir: Path, csv_path: Path, algorithm: str) -> None:
+    """
+    Write composite CSV with both quality scores and metadata columns.
+    """
+    # Extract the study directory name
+    study_dir_name = study_dir.name
+    
+    # Define base columns
+    base_columns = ["filename", "include", "reason", "error"]
+    
+    # Add quality columns based on algorithm
+    quality_columns = []
+    if "focus" in algorithm or algorithm == "all":
+        quality_columns.extend(["focus_score"])
+    if "brightness" in algorithm or algorithm == "all":
+        quality_columns.extend(["brightness_mean", "pct_dark", "pct_bright"])
+    
+    # Add metadata columns (always present for composite algorithms)
+    metadata_columns = ["IMAGE_DIR", "ILLUMINATION_MODE", "LED_COLOR", "Z_OFFSET_MODE", "EXPOSURE_MULTIPLIER", "IMAGE_SIZE", "COMMENTS"]
+    
+    # Combine all columns
+    fieldnames = base_columns + quality_columns + metadata_columns
+    
+    with csv_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        
+        total_images = len(rows)
+        for i, row in enumerate(rows):
+            # Ensure all required fields are present
+            output_row = {}
+            for field in fieldnames:
+                output_row[field] = row.get(field, "")
+            
+            # Add study directory name
+            output_row["IMAGE_DIR"] = study_dir_name
+            
+            writer.writerow(output_row)
+            
+            # Progress reporting every 100 files
+            if (i + 1) % 100 == 0:
+                print(f"Written {i + 1}/{total_images} rows...")
+    
+    print(f"Completed writing {total_images} rows to CSV.")
+
+
+def write_csv(rows: list[Dict[str, object]], csv_path: Path, algorithm: str) -> None:
+    # Define columns based on algorithm
+    base_columns = ["filename", "include", "reason", "error"]
+    
+    if algorithm == "focus":
+        fieldnames = base_columns + ["focus_score"]
+    elif algorithm == "brightness":
+        fieldnames = base_columns + ["brightness_mean", "pct_dark", "pct_bright"]
+    elif algorithm == "all":
+        fieldnames = base_columns + ["focus_score", "brightness_mean", "pct_dark", "pct_bright"]
+    else:
+        # Fallback to all columns for unknown algorithms
+        fieldnames = base_columns + ["focus_score", "brightness_mean", "pct_dark", "pct_bright"]
+    
     with csv_path.open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)
         w.writeheader()
@@ -185,13 +310,13 @@ def summarize(rows: list[Dict[str, object]]) -> Dict[str, int]:
     return {"total": total, "included": included, "excluded": excluded, "errors": errors}
 
 
-def load_algorithm_dev_json(input_dir: Path) -> Dict[str, Any]:
+def load_algorithm_dev_json(study_dir: Path) -> Dict[str, Any]:
     """
     Load and parse algorithm_dev.json file with detailed error handling.
     Returns the parsed JSON data.
     Raises SystemExit with detailed error information if parsing fails.
     """
-    algorithm_file = input_dir / "images" / "algo_dev_imageset" / "algorithm_dev.json"
+    algorithm_file = study_dir / "images" / "algo_dev_imageset" / "algorithm_dev.json"
     
     if not algorithm_file.exists():
         print(f"[ERROR] algorithm_dev.json not found in {algorithm_file}", file=sys.stderr)
@@ -251,14 +376,14 @@ def extract_image_metadata(algorithm_data: Dict[str, Any]) -> List[Dict[str, Any
     return images
 
 
-def get_file_size_with_handling(filename: str, input_dir: Path) -> Tuple[int, str]:
+def get_file_size_with_handling(filename: str, study_dir: Path) -> Tuple[int, str]:
     """
     Get file size for an image file, handling missing files.
     Returns: (file_size_bytes, comments)
     """
     # Extract just the filename from the full path
     image_filename = Path(filename).name
-    image_path = input_dir / "images" / "raw_imageset" / image_filename
+    image_path = study_dir / "images" / "raw_imageset" / image_filename
     
     if not image_path.exists():
         return 0, "file_missing"
@@ -269,12 +394,12 @@ def get_file_size_with_handling(filename: str, input_dir: Path) -> Tuple[int, st
         return 0, f"access_error:{e}"
 
 
-def write_scantypes_csv(images: List[Dict[str, Any]], input_dir: Path, csv_path: Path) -> None:
+def write_scantypes_csv(images: List[Dict[str, Any]], study_dir: Path, csv_path: Path) -> None:
     """
     Write scantypes analysis CSV with file size information.
     """
-    # Extract the study directory name (parent of images/ folder)
-    study_dir_name = input_dir.name
+    # Extract the study directory name
+    study_dir_name = study_dir.name
     fieldnames = ["FILENAME", "IMAGE_DIR", "ILLUMINATION_MODE", "LED_COLOR", "Z_OFFSET_MODE", "EXPOSURE_MULTIPLIER", "IMAGE_SIZE", "COMMENTS"]
     
     with csv_path.open("w", newline="", encoding="utf-8") as f:
@@ -284,7 +409,7 @@ def write_scantypes_csv(images: List[Dict[str, Any]], input_dir: Path, csv_path:
         total_images = len(images)
         for i, image in enumerate(images):
             # Get file size
-            file_size, comments = get_file_size_with_handling(image["filename"], input_dir)
+            file_size, comments = get_file_size_with_handling(image["filename"], study_dir)
             
             # Write row
             row = {
@@ -308,12 +433,14 @@ def write_scantypes_csv(images: List[Dict[str, Any]], input_dir: Path, csv_path:
 
 def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Analyze images with simple filters (focus or brightness) and emit CSV report."
+        description="Analyze images with composite filters and emit CSV report."
     )
-    p.add_argument("--input-dir", required=True, type=Path, help="Folder containing images")
+    p.add_argument("--study-dir", required=True, type=Path, help="Top-level study directory containing images/ and algorithm_dev.json")
     p.add_argument("--output-csv", required=True, type=Path, help="Where to write the CSV report")
-    p.add_argument("--algorithm", choices=["focus", "brightness", "all", "scantypes"], required=True,
-                   help="Which filter to use: focus (variance of Laplacian), brightness (mean + saturation), all (both must pass), or scantypes (analyze scan type groupings)")
+    p.add_argument("--algorithm", 
+                   choices=["focus", "brightness", "scantypes", "focus+brightness", "focus+scantypes", "brightness+scantypes", "all"], 
+                   required=True,
+                   help="Filter combination: focus (sharpness), brightness (lighting), scantypes (metadata), or combinations (e.g., focus+brightness+scantypes)")
 
     # Focus params
     p.add_argument("--focus-threshold", type=float, default=120.0,
@@ -344,18 +471,39 @@ def parse_args(argv=None) -> argparse.Namespace:
 def main(argv=None) -> int:
     args = parse_args(argv)
 
-    if not args.input_dir.exists() or not args.input_dir.is_dir():
-        print(f"[ERROR] --input-dir does not exist or is not a directory: {args.input_dir}", file=sys.stderr)
+    if not args.study_dir.exists() or not args.study_dir.is_dir():
+        print(f"[ERROR] --study-dir does not exist or is not a directory: {args.study_dir}", file=sys.stderr)
         return 2
 
-    # Handle scantypes algorithm separately
-    if args.algorithm == "scantypes":
-        return handle_scantypes_algorithm(args)
+    # Handle composite algorithms (those that include scantypes analysis)
+    if "scantypes" in args.algorithm or args.algorithm == "all":
+        return handle_composite_algorithm(args)
+    
+    # Handle single algorithms (focus, brightness, focus+brightness)
+    return handle_single_algorithm(args)
 
-    imgs = list_images(args.input_dir, args.recursive)
+
+def handle_single_algorithm(args: argparse.Namespace) -> int:
+    """
+    Handle single algorithms: focus, brightness, or focus+brightness
+    """
+    # Determine image directory from study directory
+    image_dir = args.study_dir / "images" / "raw_imageset"
+    
+    if not image_dir.exists():
+        print(f"[ERROR] Image directory not found: {image_dir}", file=sys.stderr)
+        return 2
+    
+    imgs = list_images(image_dir, args.recursive)
     if not imgs:
-        print(f"[WARN] No images found in {args.input_dir} (recursive={args.recursive}). Extensions: {sorted(IMAGE_EXTS)}")
+        print(f"[WARN] No images found in {image_dir} (recursive={args.recursive}). Extensions: {sorted(IMAGE_EXTS)}")
         return 0
+
+    print(f"=== {args.algorithm.upper()} Analysis ===")
+    print(f"Study directory: {args.study_dir}")
+    print(f"Image directory: {image_dir}")
+    print(f"Output CSV: {args.output_csv}")
+    print(f"Found {len(imgs)} images")
 
     start = time.perf_counter()
 
@@ -373,7 +521,7 @@ def main(argv=None) -> int:
 
     rows.sort(key=lambda r: r["filename"])
 
-    write_csv(rows, args.output_csv)
+    write_csv(rows, args.output_csv, args.algorithm)
     elapsed = time.perf_counter() - start
 
     summary = summarize(rows)
@@ -387,12 +535,12 @@ def main(argv=None) -> int:
     return 0
 
 
-def handle_scantypes_algorithm(args: argparse.Namespace) -> int:
+def handle_composite_algorithm(args: argparse.Namespace) -> int:
     """
-    Handle the scantypes algorithm: analyze scan type groupings from algorithm_dev.json
+    Handle composite algorithms that include scantypes: focus+scantypes, brightness+scantypes, all
     """
-    print("=== Scantypes Analysis ===")
-    print(f"Input directory: {args.input_dir}")
+    print(f"=== {args.algorithm.upper()} Analysis ===")
+    print(f"Study directory: {args.study_dir}")
     print(f"Output CSV: {args.output_csv}")
     
     start = time.perf_counter()
@@ -400,7 +548,87 @@ def handle_scantypes_algorithm(args: argparse.Namespace) -> int:
     try:
         # Load and parse algorithm_dev.json
         print("Loading algorithm_dev.json...")
-        algorithm_data = load_algorithm_dev_json(args.input_dir)
+        algorithm_data = load_algorithm_dev_json(args.study_dir)
+        
+        # Extract image metadata
+        print("Extracting image metadata...")
+        images_metadata = extract_image_metadata(algorithm_data)
+        print(f"Found {len(images_metadata)} image records")
+        
+        # Create a mapping of filename to metadata for quick lookup
+        # Support both full path and just filename as keys
+        metadata_map = {}
+        for img in images_metadata:
+            full_path = img["filename"]
+            just_filename = Path(full_path).name
+            metadata_map[full_path] = img
+            metadata_map[just_filename] = img
+        
+        # Determine image directory from study directory
+        image_dir = args.study_dir / "images" / "raw_imageset"
+        
+        if not image_dir.exists():
+            print(f"[ERROR] Image directory not found: {image_dir}", file=sys.stderr)
+            return 2
+        
+        # Get list of actual image files
+        imgs = list_images(image_dir, args.recursive)
+        if not imgs:
+            print(f"[WARN] No images found in {image_dir} (recursive={args.recursive}). Extensions: {sorted(IMAGE_EXTS)}")
+            return 0
+        
+        print(f"Found {len(imgs)} image files")
+        
+        # Process images with both quality analysis and metadata
+        rows: list[Dict[str, object]] = []
+        worker_count = args.workers or max(1, (os.cpu_count() or 2) - 1)
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as ex:
+            futures = {ex.submit(analyze_one_composite, p, args, metadata_map): p for p in imgs}
+            done = 0
+            for fut in concurrent.futures.as_completed(futures):
+                rows.append(fut.result())
+                done += 1
+                if done % 200 == 0:
+                    print(f"Processed {done}/{len(imgs)}...")
+        
+        rows.sort(key=lambda r: r["filename"])
+        
+        write_composite_csv(rows, args.study_dir, args.output_csv, args.algorithm)
+        elapsed = time.perf_counter() - start
+        
+        # Summary
+        summary = summarize(rows)
+        print("=== Analysis Summary ===")
+        print(f"Total files:      {summary['total']}")
+        print(f"Included:         {summary['included']}")
+        print(f"Excluded:         {summary['excluded']}")
+        print(f"Errors:           {summary['errors']}")
+        print(f"Elapsed seconds:  {elapsed:.2f}")
+        
+        return 0
+        
+    except SystemExit as e:
+        return e.code
+    except Exception as e:
+        print(f"[ERROR] Unexpected error in composite analysis: {e}", file=sys.stderr)
+        return 7
+
+
+def handle_scantypes_algorithm(args: argparse.Namespace) -> int:
+    """
+    Handle the scantypes algorithm: analyze scan type groupings from algorithm_dev.json
+    """
+    print("=== Scantypes Analysis ===")
+    print(f"Study directory: {args.study_dir}")
+    print(f"Output CSV: {args.output_csv}")
+    
+    start = time.perf_counter()
+    
+    try:
+        # Load and parse algorithm_dev.json
+        print("Loading algorithm_dev.json...")
+        algorithm_data = load_algorithm_dev_json(args.study_dir)
         
         # Extract image metadata
         print("Extracting image metadata...")
@@ -409,7 +637,7 @@ def handle_scantypes_algorithm(args: argparse.Namespace) -> int:
         
         # Write scantypes CSV
         print("Generating scantypes CSV...")
-        write_scantypes_csv(images, args.input_dir, args.output_csv)
+        write_scantypes_csv(images, args.study_dir, args.output_csv)
         
         elapsed = time.perf_counter() - start
         

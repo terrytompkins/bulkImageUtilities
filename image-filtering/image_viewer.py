@@ -115,47 +115,47 @@ def filter_data(df: pd.DataFrame, include_filter: str, filename_filter: str,
     """Filter the dataframe based on user criteria."""
     filtered_df = df.copy()
     
-    # Include filter (only for standard focus/brightness format)
-    if algorithm != "scantypes" and include_filter != "All":
+    # Include filter (for algorithms that have include column)
+    if include_filter != "All" and 'include' in filtered_df.columns:
         include_value = include_filter == "True"
         filtered_df = filtered_df[filtered_df['include'] == include_value]
     
     # Filename filter
     if filename_filter:
-        if algorithm == "scantypes":
-            # For scantypes, use FILENAME column
+        if 'FILENAME' in filtered_df.columns:
+            # For scantypes or composite algorithms, use FILENAME column
             filtered_df = filtered_df[
                 filtered_df['FILENAME'].str.contains(filename_filter, case=False, na=False)
             ]
-        else:
+        elif 'filename' in filtered_df.columns:
             # For standard format, use filename column
             filtered_df = filtered_df[
                 filtered_df['filename'].str.contains(filename_filter, case=False, na=False)
             ]
     
-    # Focus score filter (only if algorithm is focus)
-    if algorithm == "focus" and 'focus_score' in filtered_df.columns:
+    # Focus score filter (for algorithms that include focus analysis)
+    if 'focus' in algorithm and 'focus_score' in filtered_df.columns:
         filtered_df = filtered_df[
             (filtered_df['focus_score'] >= focus_min) & 
             (filtered_df['focus_score'] <= focus_max)
         ]
     
-    # Scantypes filters
-    if algorithm == "scantypes":
+    # Scantypes filters (for algorithms that include scantypes analysis)
+    if 'scantypes' in algorithm:
         # ILLUMINATION_MODE filter
-        if illumination_modes:
+        if illumination_modes and 'ILLUMINATION_MODE' in filtered_df.columns:
             filtered_df = filtered_df[filtered_df['ILLUMINATION_MODE'].isin(illumination_modes)]
         
         # LED_COLOR filter
-        if led_colors:
+        if led_colors and 'LED_COLOR' in filtered_df.columns:
             filtered_df = filtered_df[filtered_df['LED_COLOR'].isin(led_colors)]
         
         # Z_OFFSET_MODE filter
-        if z_offset_modes:
+        if z_offset_modes and 'Z_OFFSET_MODE' in filtered_df.columns:
             filtered_df = filtered_df[filtered_df['Z_OFFSET_MODE'].isin(z_offset_modes)]
         
         # EXPOSURE_MULTIPLIER filter
-        if exposure_multipliers:
+        if exposure_multipliers and 'EXPOSURE_MULTIPLIER' in filtered_df.columns:
             # Convert to string for comparison since CSV values are strings
             filtered_df = filtered_df[filtered_df['EXPOSURE_MULTIPLIER'].astype(str).isin(exposure_multipliers)]
     
@@ -199,9 +199,17 @@ def create_thumbnail_grid(images_data: List[Dict], input_dir: Path,
                     # Load thumbnail
                     # Handle different filename column names and construct proper path
                     filename = img_data.get('filename', img_data.get('FILENAME', ''))
+                    
+                    # Determine the correct image path based on the data format
                     if filename.startswith('images/raw_imageset/'):
-                        # For scantypes format, use the full path from CSV
+                        # For old scantypes format, use the full path from CSV
                         image_path = input_dir / filename
+                    elif 'ILLUMINATION_MODE' in img_data:
+                        # For composite algorithms with metadata, construct path to images/raw_imageset
+                        image_path = input_dir / "images" / "raw_imageset" / filename
+                    elif 'focus_score' in img_data or 'brightness_mean' in img_data:
+                        # For quality analysis algorithms, construct path to images/raw_imageset
+                        image_path = input_dir / "images" / "raw_imageset" / filename
                     else:
                         # For standard format, use filename directly
                         image_path = input_dir / filename
@@ -210,7 +218,7 @@ def create_thumbnail_grid(images_data: List[Dict], input_dir: Path,
                     if thumbnail:
                         # Simple, clean approach like the sample script
                         # Use the same filename for display
-                        st.image(thumbnail, use_container_width=True, caption=filename[:30])
+                        st.image(thumbnail, width='stretch', caption=filename[:30])
                         
                         # Show key metrics
                         if 'focus_score' in img_data and pd.notna(img_data['focus_score']):
@@ -276,7 +284,7 @@ def show_image_dialog(image_path: Path, image_data: Dict, all_images: List[Dict]
                 img = cv2.resize(img, (new_width, new_height))
             
             # Display image
-            st.image(img, use_container_width=True)
+            st.image(img, width='stretch')
             
             # Add zoom tip
             st.markdown("**💡 Tip:** Use your browser's zoom (Ctrl/Cmd + Plus) to examine details")
@@ -392,12 +400,78 @@ def main():
         help="Upload the CSV report from image_filter.py"
     )
     
-    # Algorithm selection
+    # Auto-detect algorithm from CSV headers
+    detected_algorithm = None
+    if csv_file is not None:
+        try:
+            # Read just the header to detect format
+            import io
+            csv_content = csv_file.read().decode('utf-8')
+            csv_file.seek(0)  # Reset file pointer for later use
+            
+            # Parse header
+            header_line = csv_content.split('\n')[0]
+            headers = [col.strip() for col in header_line.split(',')]
+            
+            # Detect format based on column presence
+            scantypes_columns = ['ILLUMINATION_MODE', 'LED_COLOR', 'Z_OFFSET_MODE', 'EXPOSURE_MULTIPLIER', 'IMAGE_SIZE', 'COMMENTS']
+            standard_columns = ['filename', 'include']
+            
+            has_scantypes = all(col in headers for col in scantypes_columns)
+            has_standard = all(col in headers for col in standard_columns)
+            has_focus = 'focus_score' in headers
+            has_brightness = 'brightness_mean' in headers
+            
+            if has_scantypes and has_standard:
+                # Composite algorithm with both metadata and quality analysis
+                if has_focus and has_brightness:
+                    detected_algorithm = "all"  # focus + brightness + scantypes
+                elif has_focus and not has_brightness:
+                    detected_algorithm = "focus+scantypes"
+                elif has_brightness and not has_focus:
+                    detected_algorithm = "brightness+scantypes"
+                else:
+                    detected_algorithm = "scantypes"  # Fallback
+            elif has_scantypes and not has_standard:
+                # Pure scantypes (old format)
+                detected_algorithm = "scantypes"
+            elif has_standard and not has_scantypes:
+                # Standard quality analysis only
+                if has_focus and has_brightness:
+                    detected_algorithm = "focus+brightness"
+                elif has_focus and not has_brightness:
+                    detected_algorithm = "focus"
+                elif has_brightness and not has_focus:
+                    detected_algorithm = "brightness"
+                else:
+                    detected_algorithm = "focus"  # Default fallback
+            else:
+                detected_algorithm = "focus"  # Ultimate fallback
+        except Exception as e:
+            st.sidebar.error(f"Error reading CSV: {e}")
+    
+    # Algorithm selection with auto-detection
+    algorithm_options = ["focus", "brightness", "focus+brightness", "scantypes", "focus+scantypes", "brightness+scantypes", "all"]
+    default_index = 0
+    
+    if detected_algorithm:
+        try:
+            default_index = algorithm_options.index(detected_algorithm)
+        except ValueError:
+            default_index = 0
+    
     algorithm = st.sidebar.selectbox(
         "🔧 Algorithm",
-        options=["focus", "brightness", "scantypes"],
-        help="Select the algorithm used for filtering"
+        options=algorithm_options,
+        index=default_index,
+        help="Select the algorithm used for filtering (auto-detected from CSV)"
     )
+    
+    # Show detection result
+    if detected_algorithm and detected_algorithm == algorithm:
+        st.sidebar.success(f"✅ Auto-detected: {detected_algorithm} format")
+    elif detected_algorithm and detected_algorithm != algorithm:
+        st.sidebar.warning(f"⚠️ Detected: {detected_algorithm}, but you selected: {algorithm}")
     
     # Filename search
     filename_filter = st.sidebar.text_input(
@@ -413,9 +487,9 @@ def main():
         help="Show all images, only included, or only excluded"
     )
     
-    # Focus score range (only show for focus algorithm)
+    # Focus score range (show for algorithms that include focus analysis)
     focus_min = focus_max = None
-    if algorithm == "focus":
+    if 'focus' in algorithm:
         st.sidebar.markdown("### 📊 Focus Score Range")
         col1, col2 = st.sidebar.columns(2)
         with col1:
@@ -423,9 +497,9 @@ def main():
         with col2:
             focus_max = st.number_input("Max", value=999.0, step=0.1, key="focus_max")
     
-    # Scantypes filters (only show for scantypes algorithm)
+    # Scantypes filters (show for algorithms that include scantypes analysis)
     illumination_modes = led_colors = z_offset_modes = exposure_multipliers = None
-    if algorithm == "scantypes":
+    if 'scantypes' in algorithm:
         st.sidebar.markdown("### 🔬 Scan Type Filters")
         
         # ILLUMINATION_MODE filter
@@ -504,12 +578,12 @@ def main():
             # Statistics
             st.sidebar.markdown("### 📊 Statistics")
             
-            # Calculate aggregate size for scantypes
+            # Calculate aggregate size for algorithms that include scantypes
             aggregate_size = 0
-            if algorithm == "scantypes" and 'IMAGE_SIZE' in filtered_df.columns:
+            if 'scantypes' in algorithm and 'IMAGE_SIZE' in filtered_df.columns:
                 aggregate_size = filtered_df['IMAGE_SIZE'].sum()
             
-            if algorithm == "scantypes":
+            if 'scantypes' in algorithm:
                 st.sidebar.markdown(f"""
                 **Total Images:** {len(df):,}  
                 **Filtered:** {len(images_data):,}  
@@ -580,9 +654,17 @@ def main():
                     if selected_data:
                         # Handle different filename column names and construct proper path
                         filename = selected_data.get('filename', selected_data.get('FILENAME', ''))
+                        
+                        # Determine the correct image path based on the data format
                         if filename.startswith('images/raw_imageset/'):
-                            # For scantypes format, use the full path from CSV
+                            # For old scantypes format, use the full path from CSV
                             image_path = input_path / filename
+                        elif 'ILLUMINATION_MODE' in selected_data:
+                            # For composite algorithms with metadata, construct path to images/raw_imageset
+                            image_path = input_path / "images" / "raw_imageset" / filename
+                        elif 'focus_score' in selected_data or 'brightness_mean' in selected_data:
+                            # For quality analysis algorithms, construct path to images/raw_imageset
+                            image_path = input_path / "images" / "raw_imageset" / filename
                         else:
                             # For standard format, use filename directly
                             image_path = input_path / filename
