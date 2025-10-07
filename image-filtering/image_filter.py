@@ -1,20 +1,25 @@
 #!/usr/bin/env python3
 """
-Filter & Report for FNA Runs (One-Pass Upload Workflow)
+Filter & Report for FNA Runs (Composite Analysis Workflow)
 
-Analyzes images in an input folder with selectable filters and emits a CSV
+Analyzes images in a study directory with selectable composite filters and emits a CSV
 report listing:
   - filename
-  - include (True/False)
+  - include (True/False) 
   - scores/metrics (focus variance, mean brightness, % dark/bright pixels)
+  - scan type metadata (illumination mode, LED color, Z offset mode, exposure multiplier)
+  - file size and comments
   - reason (why included/excluded)
 Also prints total analysis time and counts.
 
-Filters:
-  1) blur/focus: Variance of Laplacian (higher = sharper). Include if >= threshold.
-  2) brightness/exposure: Mean brightness within [min,max] AND saturated pixels (% dark or bright) <= limit.
-
-You can require BOTH with --algorithm all (i.e., include only if both pass).
+Available Algorithms:
+  1) focus: Variance of Laplacian (higher = sharper). Include if >= threshold.
+  2) brightness: Mean brightness within [min,max] AND saturated pixels (% dark or bright) <= limit.
+  3) scantypes: Extract and report scan type metadata from algorithm_dev.json.
+  4) focus+brightness: Combined quality analysis (both focus and brightness criteria).
+  5) focus+scantypes: Focus analysis with scan type metadata.
+  6) brightness+scantypes: Brightness analysis with scan type metadata.
+  7) all: Complete analysis (focus + brightness + scantypes).
 
 Dependencies: numpy, opencv-python
 Install: pip install numpy opencv-python

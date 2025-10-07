@@ -6,8 +6,8 @@ A Streamlit web application for visually reviewing the results of image filterin
 
 ### 🎛️ **Interactive Controls**
 - **File Selection**: Browse for input directory with helper tools and CSV report file upload
-- **Algorithm Selection**: Choose between "focus" and "brightness" filtering
-- **Advanced Filtering**: Filter by include status, filename search, and focus score ranges
+- **Algorithm Selection**: Choose between focus, brightness, scantypes, or combined filtering algorithms
+- **Advanced Filtering**: Filter by include status, filename search, focus score ranges, brightness criteria, and scan type metadata
 - **Display Options**: Adjust thumbnails per row and images per page
 
 ### 🖼️ **Image Display**
@@ -17,9 +17,9 @@ A Streamlit web application for visually reviewing the results of image filterin
 - **Metadata Display**: Shows focus scores, brightness values, and filtering reasons
 
 ### 📊 **Statistics & Analysis**
-- **Real-time Statistics**: Total images, filtered count, current page info
+- **Real-time Statistics**: Total images, filtered count, current page info, aggregate file sizes
 - **Visual Indicators**: Clear status indicators for included/excluded images
-- **Search & Filter**: Find specific images by filename
+- **Search & Filter**: Find specific images by filename, scan type metadata, and quality metrics
 
 ## Installation
 
@@ -37,18 +37,30 @@ First, run the image filter to generate a CSV report:
 ```bash
 # For focus filtering
 python image_filter.py \
-  --input-dir /path/to/images \
+  --study-dir /path/to/study \
   --output-csv ./focus-report.csv \
   --algorithm focus \
   --focus-threshold 2.0
 
 # For brightness filtering  
 python image_filter.py \
-  --input-dir /path/to/images \
+  --study-dir /path/to/study \
   --output-csv ./brightness-report.csv \
   --algorithm brightness \
   --brightness-min 12 --brightness-max 195 \
   --saturation-pct-limit 4.0
+
+# For scantypes filtering
+python image_filter.py \
+  --study-dir /path/to/study \
+  --output-csv ./scantypes-report.csv \
+  --algorithm scantypes
+
+# For combined filtering (focus + brightness + scantypes)
+python image_filter.py \
+  --study-dir /path/to/study \
+  --output-csv ./complete-analysis.csv \
+  --algorithm all
 ```
 
 ### 2. Launch Image Viewer
@@ -61,7 +73,14 @@ streamlit run image_viewer.py
 ### 3. Configure Viewer
 1. **Select Input Directory**: Use the browse button (📂) for guidance, or paste the directory path
 2. **Upload CSV Report**: Upload the CSV file from step 1
-3. **Choose Algorithm**: Select "focus" or "brightness" to match your filtering
+3. **Choose Algorithm**: Select from the available filtering algorithms:
+   - `focus`: Focus/sharpness analysis only
+   - `brightness`: Brightness and saturation analysis only
+   - `focus+brightness`: Combined quality analysis
+   - `scantypes`: Scan type metadata analysis only
+   - `focus+scantypes`: Focus analysis with scan type metadata
+   - `brightness+scantypes`: Brightness analysis with scan type metadata
+   - `all`: Complete analysis (focus + brightness + scantypes)
 4. **Apply Filters**: Use sidebar controls to refine your view
 
 ## Interface Guide
@@ -72,10 +91,12 @@ streamlit run image_viewer.py
 |---------|-------------|
 | **Input Directory** | Path to folder containing images (with browse helper) |
 | **CSV Report File** | Upload the CSV report from image_filter.py |
-| **Algorithm** | Select "focus" or "brightness" |
+| **Algorithm** | Select from 7 available algorithms (auto-detected from CSV) |
 | **Search Filename** | Filter images by filename (partial match) |
 | **Include Filter** | Show all, only included, or only excluded images |
 | **Focus Score Range** | Min/max focus scores (only for focus algorithm) |
+| **Brightness Filters** | Min/max brightness, dark/bright thresholds (only for brightness algorithm) |
+| **Scan Type Filters** | Multi-select filters for illumination mode, LED color, Z offset mode, exposure multiplier (only for scantypes algorithm) |
 | **Thumbnails per row** | Number of thumbnails per row (1-20) |
 | **Images per page** | Number of images per page (10-200) |
 

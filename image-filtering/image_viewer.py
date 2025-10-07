@@ -110,6 +110,8 @@ def load_image_thumbnail(image_path: Path, size: Tuple[int, int]) -> Optional[Im
 
 def filter_data(df: pd.DataFrame, include_filter: str, filename_filter: str, 
                 algorithm: str, focus_min: float, focus_max: float,
+                brightness_min: float = None, brightness_max: float = None,
+                dark_threshold: float = None, bright_threshold: float = None,
                 illumination_modes: List[str] = None, led_colors: List[str] = None,
                 z_offset_modes: List[str] = None, exposure_multipliers: List[str] = None) -> pd.DataFrame:
     """Filter the dataframe based on user criteria."""
@@ -140,24 +142,53 @@ def filter_data(df: pd.DataFrame, include_filter: str, filename_filter: str,
             (filtered_df['focus_score'] <= focus_max)
         ]
     
+    # Brightness filters (for algorithms that include brightness analysis)
+    if 'brightness' in algorithm and 'brightness_mean' in filtered_df.columns:
+        if brightness_min is not None and brightness_max is not None:
+            filtered_df = filtered_df[
+                (filtered_df['brightness_mean'] >= brightness_min) & 
+                (filtered_df['brightness_mean'] <= brightness_max)
+            ]
+        
+        if dark_threshold is not None and 'pct_dark' in filtered_df.columns:
+            filtered_df = filtered_df[filtered_df['pct_dark'] <= dark_threshold]
+        
+        if bright_threshold is not None and 'pct_bright' in filtered_df.columns:
+            filtered_df = filtered_df[filtered_df['pct_bright'] <= bright_threshold]
+    
     # Scantypes filters (for algorithms that include scantypes analysis)
     if 'scantypes' in algorithm:
         # ILLUMINATION_MODE filter
         if illumination_modes and 'ILLUMINATION_MODE' in filtered_df.columns:
-            filtered_df = filtered_df[filtered_df['ILLUMINATION_MODE'].isin(illumination_modes)]
+            # Include rows where ILLUMINATION_MODE is in the selected values OR is null
+            filtered_df = filtered_df[
+                filtered_df['ILLUMINATION_MODE'].isin(illumination_modes) | 
+                filtered_df['ILLUMINATION_MODE'].isnull()
+            ]
         
         # LED_COLOR filter
         if led_colors and 'LED_COLOR' in filtered_df.columns:
-            filtered_df = filtered_df[filtered_df['LED_COLOR'].isin(led_colors)]
+            # Include rows where LED_COLOR is in the selected values OR is null
+            filtered_df = filtered_df[
+                filtered_df['LED_COLOR'].isin(led_colors) | 
+                filtered_df['LED_COLOR'].isnull()
+            ]
         
         # Z_OFFSET_MODE filter
         if z_offset_modes and 'Z_OFFSET_MODE' in filtered_df.columns:
-            filtered_df = filtered_df[filtered_df['Z_OFFSET_MODE'].isin(z_offset_modes)]
+            # Include rows where Z_OFFSET_MODE is in the selected values OR is null
+            filtered_df = filtered_df[
+                filtered_df['Z_OFFSET_MODE'].isin(z_offset_modes) | 
+                filtered_df['Z_OFFSET_MODE'].isnull()
+            ]
         
         # EXPOSURE_MULTIPLIER filter
         if exposure_multipliers and 'EXPOSURE_MULTIPLIER' in filtered_df.columns:
-            # Convert to string for comparison since CSV values are strings
-            filtered_df = filtered_df[filtered_df['EXPOSURE_MULTIPLIER'].astype(str).isin(exposure_multipliers)]
+            # Include rows where EXPOSURE_MULTIPLIER is in the selected values OR is null
+            filtered_df = filtered_df[
+                filtered_df['EXPOSURE_MULTIPLIER'].astype(str).isin(exposure_multipliers) | 
+                filtered_df['EXPOSURE_MULTIPLIER'].isnull()
+            ]
     
     return filtered_df
 
@@ -358,6 +389,8 @@ def main():
         st.session_state.selected_image = None
     if 'current_page' not in st.session_state:
         st.session_state.current_page = 0
+    if 'last_filter_state' not in st.session_state:
+        st.session_state.last_filter_state = None
     
     # Sidebar controls
     st.sidebar.markdown("## 🎛️ Controls")
@@ -497,6 +530,27 @@ def main():
         with col2:
             focus_max = st.number_input("Max", value=999.0, step=0.1, key="focus_max")
     
+    # Brightness filters (show for algorithms that include brightness analysis)
+    brightness_min = brightness_max = dark_threshold = bright_threshold = None
+    if 'brightness' in algorithm:
+        st.sidebar.markdown("### 💡 Brightness Filters")
+        
+        # Brightness range
+        st.sidebar.markdown("**Brightness Range (0-255)**")
+        col1, col2 = st.sidebar.columns(2)
+        with col1:
+            brightness_min = st.number_input("Min Brightness", value=0.0, min_value=0.0, max_value=255.0, step=1.0, key="brightness_min")
+        with col2:
+            brightness_max = st.number_input("Max Brightness", value=255.0, min_value=0.0, max_value=255.0, step=1.0, key="brightness_max")
+        
+        # Saturation thresholds
+        st.sidebar.markdown("**Saturation Thresholds**")
+        col3, col4 = st.sidebar.columns(2)
+        with col3:
+            dark_threshold = st.number_input("Dark Threshold", value=100.0, min_value=0.0, max_value=100.0, step=0.1, key="dark_threshold")
+        with col4:
+            bright_threshold = st.number_input("Bright Threshold", value=100.0, min_value=0.0, max_value=100.0, step=0.1, key="bright_threshold")
+    
     # Scantypes filters (show for algorithms that include scantypes analysis)
     illumination_modes = led_colors = z_offset_modes = exposure_multipliers = None
     if 'scantypes' in algorithm:
@@ -565,10 +619,22 @@ def main():
             df = load_csv_data(csv_file)
         
         if df is not None:
+            # Check if filters have changed and clear selected image if so
+            current_filter_state = (
+                include_filter, filename_filter, algorithm, 
+                focus_min, focus_max, brightness_min, brightness_max, 
+                dark_threshold, bright_threshold, illumination_modes, 
+                led_colors, z_offset_modes, exposure_multipliers
+            )
+            
+            if st.session_state.last_filter_state != current_filter_state:
+                st.session_state.selected_image = None
+                st.session_state.last_filter_state = current_filter_state
             # Filter data
             filtered_df = filter_data(
                 df, include_filter, filename_filter, algorithm, 
                 focus_min or 0.0, focus_max or 999.0,
+                brightness_min, brightness_max, dark_threshold, bright_threshold,
                 illumination_modes, led_colors, z_offset_modes, exposure_multipliers
             )
             
@@ -586,7 +652,7 @@ def main():
             if 'scantypes' in algorithm:
                 st.sidebar.markdown(f"""
                 **Total Images:** {len(df):,}  
-                **Filtered:** {len(images_data):,}  
+                **Images Shown:** {len(images_data):,}  
                 **Aggregate Size:** {aggregate_size:,} bytes  
                 **Current Page:** {st.session_state.current_page + 1}  
                 **Pages:** {(len(images_data) - 1) // page_size + 1}
@@ -594,7 +660,7 @@ def main():
             else:
                 st.sidebar.markdown(f"""
                 **Total Images:** {len(df):,}  
-                **Filtered:** {len(images_data):,}  
+                **Images Shown:** {len(images_data):,}  
                 **Current Page:** {st.session_state.current_page + 1}  
                 **Pages:** {(len(images_data) - 1) // page_size + 1}
                 """)
@@ -634,7 +700,8 @@ def main():
                     st.session_state.selected_image, st.session_state.current_page, page_size
                 )
                 
-                if selected:
+                # Only update selected_image if a new selection was made (not from filter changes)
+                if selected and selected != st.session_state.selected_image:
                     st.session_state.selected_image = selected
                     st.rerun()
                 
