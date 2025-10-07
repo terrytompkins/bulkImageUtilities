@@ -5,7 +5,7 @@ This directory contains tools for filtering and analyzing images in bulk, specif
 ## Contents
 
 ### Scripts
-- **`image_filter.py`** - Command-line tool for filtering images based on focus and brightness criteria
+- **`image_filter.py`** - Command-line tool for filtering images based on focus, brightness, and scan type criteria
 - **`image_viewer.py`** - Streamlit web application for visually reviewing filtering results
 - **`st-dialog-test.py`** - Test script for Streamlit dialog functionality
 
@@ -31,18 +31,24 @@ pip install -r requirements.txt
 ```bash
 # Focus filtering
 python image_filter.py \
-  --input-dir /path/to/images \
+  --study-dir /path/to/study \
   --output-csv ./focus-report.csv \
   --algorithm focus \
   --focus-threshold 2.0
 
 # Brightness filtering
 python image_filter.py \
-  --input-dir /path/to/images \
+  --study-dir /path/to/study \
   --output-csv ./brightness-report.csv \
   --algorithm brightness \
   --brightness-min 12 --brightness-max 195 \
   --saturation-pct-limit 4.0
+
+# Scan type filtering
+python image_filter.py \
+  --study-dir /path/to/study \
+  --output-csv ./scantypes-report.csv \
+  --algorithm scantypes
 ```
 
 ### View Results
