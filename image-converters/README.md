@@ -6,7 +6,6 @@ This directory contains tools for converting, compressing, and optimizing images
 
 ### Scripts
 - **`image_converter.py`** - Main image conversion and compression tool with advanced features
-- **`hdr_compression.ipynb`** - Jupyter notebook for HDR image compression analysis
 - **`compression_example.py`** - Example usage script demonstrating PNG compression and archiving features
 
 ### Testing
@@ -150,4 +149,3 @@ These tools work seamlessly with other utilities:
 
 - **`INSTALL_COMPRESSION_TOOLS.md`** - Complete installation guide
 - **`png_compression_playbook.md`** - PNG optimization strategies
-- **`hdr_compression.ipynb`** - HDR compression analysis examples

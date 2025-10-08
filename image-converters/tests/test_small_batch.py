@@ -11,7 +11,7 @@ import shutil
 def test_small_batch():
     """Test compression on just 5 files to see if it works."""
     
-    source_dir = Path("~/src/inVueDx/inVueDxFNAimages/FNA_IMAGES/IVDX000877_20250624_100824").expanduser()
+    source_dir = Path("./IVDX000877_20250624_100824").expanduser()
     # Use tests/output directory for test data (relative to tests/ directory)
     test_dir = Path("output/test_small_batch")
     

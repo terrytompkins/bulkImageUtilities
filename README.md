@@ -9,7 +9,6 @@ This repository is organized into specialized tool categories:
 ### 📁 [image-converters/](image-converters/)
 **Image conversion, compression, and optimization tools**
 - `image_converter.py` - Advanced image conversion with PNG optimization and archiving
-- `hdr_compression.ipynb` - HDR compression analysis notebook
 - `compression_example.py` - Example usage script for compression features
 - `tests/` - Comprehensive test suite for validation and benchmarking
 - Comprehensive documentation for compression tools and strategies
