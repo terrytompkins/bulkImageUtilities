@@ -73,7 +73,9 @@ Install these tools separately:
 - Queries S3 objects matching structured path patterns
 - Supports date range queries with automatic partition generation
 - Filters by IoT device serial numbers, run types, and optional run UUIDs
+- **Metadata filtering**: Filter runs by JSON metadata fields using dot notation
 - Calculates total size for each matching image collection
+- Downloads metadata files for client-side filtering and analysis
 - Outputs results to CSV with detailed run information
 - Handles large date ranges efficiently with pagination
 
@@ -118,6 +120,24 @@ python query_payload_size.py --bucket my-bucket --prefix invue_fna \
     --run-uuid E27A704B-DAB6-4282-BF6B-2EBF7079DEA6 \
     --image-sub-folder images/raw_imageset/ --output results.csv
 
+# Query with metadata filtering (filter by firmware version and species)
+python query_payload_size.py --bucket my-bucket --prefix invue_fna \
+    --start-date 2022-11-19 --end-date 2022-11-20 \
+    --serial-numbers IVDX009978 --run-type run_fna \
+    --image-sub-folder images/raw_imageset/ \
+    --metadata-file metadata/fna_results.json \
+    --query-field run_metadata.INST_SW_VERSION=1.14.2 \
+    --query-field run_metadata.SPECIES=Canine \
+    --output-dir ./metadata-downloads --output results.csv
+
+# Download metadata files without filtering (for manual inspection)
+python query_payload_size.py --bucket my-bucket --prefix invue_fna \
+    --start-date 2022-11-19 --end-date 2022-11-20 \
+    --serial-numbers IVDX009978 --run-type run_fna \
+    --image-sub-folder images/raw_imageset/ \
+    --metadata-file metadata/fna_results.json \
+    --download-metadata --output-dir ./metadata-downloads
+
 # Using a specific AWS profile
 AWS_PROFILE=my-profile python query_payload_size.py --bucket my-bucket ...
 ```
@@ -134,6 +154,10 @@ AWS_PROFILE=my-profile python query_payload_size.py --bucket my-bucket ...
 **Optional parameters:**
 - `--run-uuid`: Filter by specific run UUID
 - `--output`: Output CSV file path (default: query_payload_size.csv)
+- `--metadata-file`: Path to metadata JSON file relative to run folder (e.g., `metadata/fna_results.json`)
+- `--query-field`: Query field in format `key.path=value` (can be specified multiple times). Example: `--query-field run_metadata.INST_SW_VERSION=1.14.2`
+- `--output-dir`: Directory to download metadata files (required when using `--query-field` or `--download-metadata`)
+- `--download-metadata`: Download metadata files even without filtering (requires `--output-dir`)
 
 **Output CSV columns:**
 - Date/Time: Formatted timestamp from the run
@@ -141,6 +165,46 @@ AWS_PROFILE=my-profile python query_payload_size.py --bucket my-bucket ...
 - Run UUID: Unique identifier for the run
 - Run Type: Type of run operation
 - Size (bytes): Total size of the image collection
+- Metadata Matched: "Yes" or "No" (only when `--query-field` is used)
+- Additional columns: One column per query field showing the actual value from metadata (column name is the last part of the dot-notation path, e.g., `INST_SW_VERSION`)
+
+## Metadata Filtering
+
+The `query_payload_size.py` script supports filtering image runs based on metadata stored in JSON files within each run folder. This is useful for isolating runs based on firmware versions, species, or other metadata attributes.
+
+### How It Works
+
+1. **Specify the metadata file location**: Use `--metadata-file` to point to the JSON file relative to each run folder (e.g., `metadata/fna_results.json`)
+
+2. **Define query fields**: Use one or more `--query-field` parameters to specify which metadata fields to match:
+   ```bash
+   --query-field run_metadata.INST_SW_VERSION=1.14.2
+   --query-field run_metadata.SPECIES=Canine
+   ```
+
+3. **Provide output directory**: Use `--output-dir` to specify where downloaded metadata files should be stored
+
+4. **Filtering behavior**:
+   - Only runs matching ALL specified query fields are included in results
+   - Comparisons are case-insensitive (e.g., `Canine` matches `CANINE` or `canine`)
+   - Values are normalized to strings for comparison
+   - Missing or invalid metadata files cause runs to be excluded when filtering
+
+### Query Field Syntax
+
+- Use dot notation to access nested JSON keys: `parent.child.grandchild`
+- Format: `key.path=value` (no spaces around the `=`)
+- Example: `run_metadata.CLINICAL_SIGNS.RUN_SAMPLE_TYPE=FNA`
+
+### Downloading Metadata Without Filtering
+
+To download metadata files for manual inspection without filtering:
+```bash
+python query_payload_size.py ... --metadata-file metadata/fna_results.json \
+    --download-metadata --output-dir ./metadata-downloads
+```
+
+Downloaded files are named by run UUID (e.g., `817C998F-FAB3-43D1-8A66-5C06F55F2198.json`) for easy traceability.
 
 ## Performance Tips
 
