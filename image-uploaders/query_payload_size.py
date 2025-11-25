@@ -146,6 +146,7 @@ def find_matching_runs(
     image_sub_folder: str,
     metadata_file_path: Optional[str] = None,
     query_fields: Optional[List[Tuple[str, str]]] = None,
+    add_report_fields: Optional[List[str]] = None,
     output_dir: Optional[str] = None,
     download_metadata: bool = False,
     verbose: bool = False
@@ -201,8 +202,9 @@ def find_matching_runs(
         # Handle metadata filtering and downloading
         metadata_matched = True
         metadata_field_values = {}
+        additional_field_values = {}
         
-        if metadata_file_path and (query_fields or download_metadata):
+        if metadata_file_path and (query_fields or download_metadata or add_report_fields):
             # Download metadata file if needed
             if verbose:
                 print(f"  Processing run {run_info['run_uuid']}...", file=sys.stderr)
@@ -221,16 +223,23 @@ def find_matching_runs(
                 # Load and check metadata
                 metadata = load_metadata_file(local_metadata_path)
                 
-                if metadata and query_fields:
-                    # Check if metadata matches query fields
-                    if verbose:
-                        print(f"  Checking metadata for run {run_info['run_uuid']}:", file=sys.stderr)
-                    matches, field_values = check_metadata_matches(metadata, query_fields, verbose)
-                    metadata_matched = matches
-                    metadata_field_values = field_values
-                    if verbose:
-                        status = "MATCHED" if matches else "NOT MATCHED"
-                        print(f"  Run {run_info['run_uuid']}: Overall result - {status}", file=sys.stderr)
+                if metadata:
+                    if query_fields:
+                        # Check if metadata matches query fields
+                        if verbose:
+                            print(f"  Checking metadata for run {run_info['run_uuid']}:", file=sys.stderr)
+                        matches, field_values = check_metadata_matches(metadata, query_fields, verbose)
+                        metadata_matched = matches
+                        metadata_field_values = field_values
+                        if verbose:
+                            status = "MATCHED" if matches else "NOT MATCHED"
+                            print(f"  Run {run_info['run_uuid']}: Overall result - {status}", file=sys.stderr)
+                    
+                    # Extract additional report fields if specified
+                    if add_report_fields:
+                        for field_path in add_report_fields:
+                            value = get_nested_value(metadata, field_path)
+                            additional_field_values[field_path] = value if value is not None else ""
                 elif not metadata and query_fields:
                     # Invalid JSON - treat as not matching only if filtering is required
                     metadata_matched = False
@@ -246,6 +255,7 @@ def find_matching_runs(
         # Add metadata match status and field values to result
         run_info["metadata_matched"] = metadata_matched
         run_info["metadata_field_values"] = metadata_field_values
+        run_info["additional_field_values"] = additional_field_values
         
         # Include all runs that match cloud-side criteria
         # The metadata_matched flag indicates whether they also matched client-side criteria
@@ -532,9 +542,15 @@ Examples:
              "Example: --query-field 'run_metadata.INST_SW_VERSION=1.14.2'"
     )
     parser.add_argument(
+        "--add-report-fields",
+        default=None,
+        help="Comma-separated list of dot-notation key paths from metadata JSON to include in CSV output. "
+             "Example: 'run_metadata.PATIENT_ID,run_metadata.SPECIES'"
+    )
+    parser.add_argument(
         "--output-dir",
         default=None,
-        help="Optional: Directory to download metadata files to (required if --query-field or --download-metadata is used)"
+        help="Optional: Directory to download metadata files to (required if --query-field, --add-report-fields, or --download-metadata is used)"
     )
     parser.add_argument(
         "--download-metadata",
@@ -576,15 +592,23 @@ Examples:
                 print(f"Error: {e}", file=sys.stderr)
                 sys.exit(1)
     
+    # Parse add-report-fields
+    add_report_fields = None
+    if args.add_report_fields:
+        add_report_fields = [f.strip() for f in args.add_report_fields.split(",") if f.strip()]
+        if not add_report_fields:
+            print("Error: --add-report-fields must contain at least one field path", file=sys.stderr)
+            sys.exit(1)
+    
     # Validate metadata-related parameters
-    needs_output_dir = (query_fields is not None) or args.download_metadata
+    needs_output_dir = (query_fields is not None) or args.download_metadata or (add_report_fields is not None)
     if needs_output_dir and not args.output_dir:
-        print("Error: --output-dir is required when using --query-field or --download-metadata", file=sys.stderr)
+        print("Error: --output-dir is required when using --query-field, --add-report-fields, or --download-metadata", file=sys.stderr)
         sys.exit(1)
     
     if args.metadata_file and not needs_output_dir:
-        print("Warning: --metadata-file specified but no filtering or download requested. "
-              "Specify --query-field or --download-metadata to use metadata files.", file=sys.stderr)
+        print("Warning: --metadata-file specified but no filtering, reporting, or download requested. "
+              "Specify --query-field, --add-report-fields, or --download-metadata to use metadata files.", file=sys.stderr)
     
     # Initialize S3 client
     s3_client = boto3.client("s3")
@@ -606,6 +630,10 @@ Examples:
         print(f"Metadata query fields: {len(query_fields)} field(s)")
         for key_path, value in query_fields:
             print(f"  - {key_path} = {value}")
+    if add_report_fields:
+        print(f"Additional report fields: {len(add_report_fields)} field(s)")
+        for field_path in add_report_fields:
+            print(f"  - {field_path}")
     if args.output_dir:
         print(f"Metadata output directory: {args.output_dir}")
     print()
@@ -625,6 +653,7 @@ Examples:
             args.image_sub_folder,
             args.metadata_file,
             query_fields,
+            add_report_fields,
             args.output_dir,
             args.download_metadata,
             args.verbose
@@ -646,6 +675,13 @@ Examples:
         for key_path, _ in query_fields:
             # Extract the last part of the key path for column name
             column_name = key_path.split(".")[-1]
+            base_fieldnames.append(column_name)
+    
+    # Add columns for additional report fields
+    if add_report_fields:
+        for field_path in add_report_fields:
+            # Extract the last part of the key path as column name
+            column_name = field_path.split(".")[-1]
             base_fieldnames.append(column_name)
     
     # Write results to CSV
@@ -670,6 +706,13 @@ Examples:
                 for key_path, _ in query_fields:
                     column_name = key_path.split(".")[-1]
                     row[column_name] = field_values.get(key_path, "")
+            
+            # Add additional report fields if specified
+            if add_report_fields:
+                additional_values = result.get("additional_field_values", {})
+                for field_path in add_report_fields:
+                    column_name = field_path.split(".")[-1]
+                    row[column_name] = additional_values.get(field_path, "")
             
             writer.writerow(row)
     

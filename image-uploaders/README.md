@@ -74,6 +74,7 @@ Install these tools separately:
 - Supports date range queries with automatic partition generation
 - Filters by IoT device serial numbers, run types, and optional run UUIDs
 - **Metadata filtering**: Filter runs by JSON metadata fields using dot notation
+- **Additional metadata fields**: Include any metadata fields in CSV output for analysis
 - Calculates total size for each matching image collection
 - Downloads metadata files for client-side filtering and analysis
 - Outputs results to CSV with detailed run information
@@ -144,6 +145,15 @@ python query_payload_size.py --bucket my-bucket --prefix invue_fna \
     --metadata-file metadata/fna_results.json \
     --download-metadata --output-dir ./metadata-downloads
 
+# Include additional metadata fields in CSV output
+python query_payload_size.py --bucket my-bucket --prefix invue_fna \
+    --start-date 2022-11-19 --end-date 2022-11-20 \
+    --run-type run_fna \
+    --image-sub-folder images/raw_imageset/ \
+    --metadata-file metadata/fna_results.json \
+    --add-report-fields run_metadata.PATIENT_ID,run_metadata.SPECIES,run_metadata.INST_SW_VERSION \
+    --output-dir ./metadata-downloads --output results.csv
+
 # Using a specific AWS profile
 AWS_PROFILE=my-profile python query_payload_size.py --bucket my-bucket ...
 ```
@@ -163,7 +173,8 @@ AWS_PROFILE=my-profile python query_payload_size.py --bucket my-bucket ...
 - `--output`: Output CSV file path (default: query_payload_size.csv)
 - `--metadata-file`: Path to metadata JSON file relative to run folder (e.g., `metadata/fna_results.json`)
 - `--query-field`: Query field in format `key.path=value` (can be specified multiple times). Example: `--query-field run_metadata.INST_SW_VERSION=1.14.2`
-- `--output-dir`: Directory to download metadata files (required when using `--query-field` or `--download-metadata`)
+- `--add-report-fields`: Comma-separated list of dot-notation key paths from metadata JSON to include in CSV output. Example: `run_metadata.PATIENT_ID,run_metadata.SPECIES`
+- `--output-dir`: Directory to download metadata files (required when using `--query-field`, `--add-report-fields`, or `--download-metadata`)
 - `--download-metadata`: Download metadata files even without filtering (requires `--output-dir`)
 
 **Output CSV columns:**
@@ -173,7 +184,8 @@ AWS_PROFILE=my-profile python query_payload_size.py --bucket my-bucket ...
 - Run Type: Type of run operation
 - Size (bytes): Total size of the image collection
 - Metadata Matched: "Yes" or "No" (only when `--query-field` is used). Shows whether the run matched the client-side metadata criteria. All runs matching cloud-side criteria are included in the output, regardless of metadata match status.
-- Additional columns: One column per query field showing the actual value from metadata (column name is the last part of the dot-notation path, e.g., `INST_SW_VERSION`)
+- Query field columns: One column per `--query-field` showing the actual value from metadata (column name is the last part of the dot-notation path, e.g., `INST_SW_VERSION`)
+- Additional report field columns: One column per `--add-report-fields` showing the value from metadata (column name is the last part of the dot-notation path, e.g., `PATIENT_ID`). Missing fields show empty strings.
 
 ## Metadata Filtering
 
@@ -204,6 +216,18 @@ The `query_payload_size.py` script supports filtering image runs based on metada
 - Use dot notation to access nested JSON keys: `parent.child.grandchild`
 - Format: `key.path=value` (no spaces around the `=`)
 - Example: `run_metadata.CLINICAL_SIGNS.RUN_SAMPLE_TYPE=FNA`
+
+### Including Additional Metadata Fields in Reports
+
+You can include additional metadata fields in the CSV output without filtering. This is useful for analysis and reporting:
+
+```bash
+python query_payload_size.py ... --metadata-file metadata/fna_results.json \
+    --add-report-fields run_metadata.PATIENT_ID,run_metadata.SPECIES,run_metadata.INST_SW_VERSION \
+    --output-dir ./metadata-downloads
+```
+
+The specified fields will appear as additional columns in the CSV output. Column names use the last part of the dot-notation path (e.g., `run_metadata.PATIENT_ID` becomes `PATIENT_ID`). If a field doesn't exist in a metadata file, the cell will be empty.
 
 ### Downloading Metadata Without Filtering
 
