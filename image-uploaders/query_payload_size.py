@@ -17,6 +17,12 @@ Usage
         --serial-numbers IVDX009978 --run-type run_fna \
         --image-sub-folder images/raw_imageset/ --output results.csv
 
+    # Query all devices (no serial number filter)
+    python query_payload_size.py --bucket my-bucket --prefix invue_fna \
+        --start-date 2022-11-19 --end-date 2022-11-20 \
+        --run-type run_fna \
+        --image-sub-folder images/raw_imageset/ --output results.csv
+
     # Query with metadata filtering
     python query_payload_size.py --bucket my-bucket --prefix invue_fna \
         --start-date 2022-11-19 --end-date 2022-11-20 \
@@ -67,9 +73,12 @@ def generate_date_partitions(start_date: datetime, end_date: datetime) -> List[s
     return partitions
 
 
-def parse_serial_numbers(serial_str: str) -> Set[str]:
-    """Parse comma-separated serial numbers into a set."""
-    return {s.strip() for s in serial_str.split(",") if s.strip()}
+def parse_serial_numbers(serial_str: Optional[str]) -> Optional[Set[str]]:
+    """Parse comma-separated serial numbers into a set. Returns None if input is None or empty."""
+    if not serial_str or not serial_str.strip():
+        return None
+    serials = {s.strip() for s in serial_str.split(",") if s.strip()}
+    return serials if serials else None
 
 
 def extract_run_info_from_key(key: str) -> Optional[Tuple[str, str, str, str]]:
@@ -131,7 +140,7 @@ def find_matching_runs(
     bucket: str,
     prefix: str,
     date_partition: str,
-    serial_numbers: Set[str],
+    serial_numbers: Optional[Set[str]],
     run_type: str,
     run_uuid: Optional[str],
     image_sub_folder: str,
@@ -166,7 +175,7 @@ def find_matching_runs(
         serial, timestamp, rt, uuid = run_info
         
         # Filter by criteria
-        if serial not in serial_numbers:
+        if serial_numbers is not None and serial not in serial_numbers:
             continue
         if rt != run_type:
             continue
@@ -450,6 +459,15 @@ Examples:
       --image-sub-folder images/raw_imageset/ \\
       --metadata-file metadata/fna_results.json \\
       --download-metadata --output-dir ./metadata-downloads
+
+  # Query all devices (no serial number filter) with metadata filtering
+  python query_payload_size.py --bucket my-bucket --prefix invue_fna \\
+      --start-date 2022-11-19 --end-date 2022-11-20 \\
+      --run-type run_fna \\
+      --image-sub-folder images/raw_imageset/ \\
+      --metadata-file metadata/fna_results.json \\
+      --query-field run_metadata.INST_SW_VERSION=1.14.2 \\
+      --output-dir ./metadata-downloads --output results.csv
         """
     )
     
@@ -477,8 +495,9 @@ Examples:
     )
     parser.add_argument(
         "--serial-numbers",
-        required=True,
-        help="Comma-separated list of IoT device serial numbers (e.g., 'IVDX009978,IVDX009979')"
+        default=None,
+        help="Optional: Comma-separated list of IoT device serial numbers (e.g., 'IVDX009978,IVDX009979'). "
+             "If not specified, searches all serial numbers matching other criteria."
     )
     parser.add_argument(
         "--run-type",
@@ -542,11 +561,8 @@ Examples:
         print("Error: start-date must be <= end-date", file=sys.stderr)
         sys.exit(1)
     
-    # Parse serial numbers
+    # Parse serial numbers (optional)
     serial_numbers = parse_serial_numbers(args.serial_numbers)
-    if not serial_numbers:
-        print("Error: At least one serial number must be provided", file=sys.stderr)
-        sys.exit(1)
     
     # Parse query fields
     query_fields = None
@@ -577,7 +593,10 @@ Examples:
     date_partitions = generate_date_partitions(start_date, end_date)
     
     print(f"Searching for runs in {len(date_partitions)} date partition(s)...")
-    print(f"Serial numbers: {', '.join(sorted(serial_numbers))}")
+    if serial_numbers:
+        print(f"Serial numbers: {', '.join(sorted(serial_numbers))}")
+    else:
+        print(f"Serial numbers: (all)")
     print(f"Run type: {args.run_type}")
     if args.run_uuid:
         print(f"Run UUID: {args.run_uuid}")

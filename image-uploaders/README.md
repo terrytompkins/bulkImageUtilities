@@ -113,6 +113,12 @@ python query_payload_size.py --bucket my-bucket --prefix invue_fna \
     --serial-numbers IVDX009978 --run-type run_fna \
     --image-sub-folder images/raw_imageset/
 
+# Query all devices (no serial number filter) for a date range
+python query_payload_size.py --bucket my-bucket --prefix invue_fna \
+    --start-date 2022-11-19 --end-date 2022-11-20 \
+    --run-type run_fna \
+    --image-sub-folder images/raw_imageset/ --output results.csv
+
 # Query multiple devices with a specific run UUID
 python query_payload_size.py --bucket my-bucket --prefix invue_fna \
     --start-date 2022-11-19 --end-date 2022-11-19 \
@@ -147,11 +153,12 @@ AWS_PROFILE=my-profile python query_payload_size.py --bucket my-bucket ...
 - `--prefix`: Prefix path below bucket (e.g., "invue_fna")
 - `--start-date`: Start date in YYYY-MM-DD format
 - `--end-date`: End date in YYYY-MM-DD format
-- `--serial-numbers`: Comma-separated list of IoT device serial numbers
 - `--run-type`: Run type (e.g., "run_fna")
 - `--image-sub-folder`: Image sub-folder path below run UUID
 
 **Optional parameters:**
+- `--serial-numbers`: Comma-separated list of IoT device serial numbers (e.g., "IVDX009978,IVDX009979"). If not specified, searches all serial numbers matching other criteria.
+
 - `--run-uuid`: Filter by specific run UUID
 - `--output`: Output CSV file path (default: query_payload_size.csv)
 - `--metadata-file`: Path to metadata JSON file relative to run folder (e.g., `metadata/fna_results.json`)
