@@ -172,7 +172,7 @@ AWS_PROFILE=my-profile python query_payload_size.py --bucket my-bucket ...
 - Run UUID: Unique identifier for the run
 - Run Type: Type of run operation
 - Size (bytes): Total size of the image collection
-- Metadata Matched: "Yes" or "No" (only when `--query-field` is used)
+- Metadata Matched: "Yes" or "No" (only when `--query-field` is used). Shows whether the run matched the client-side metadata criteria. All runs matching cloud-side criteria are included in the output, regardless of metadata match status.
 - Additional columns: One column per query field showing the actual value from metadata (column name is the last part of the dot-notation path, e.g., `INST_SW_VERSION`)
 
 ## Metadata Filtering
@@ -192,10 +192,12 @@ The `query_payload_size.py` script supports filtering image runs based on metada
 3. **Provide output directory**: Use `--output-dir` to specify where downloaded metadata files should be stored
 
 4. **Filtering behavior**:
-   - Only runs matching ALL specified query fields are included in results
+   - All runs matching cloud-side criteria (date, serial numbers, run type, etc.) are included in the CSV output
+   - The "Metadata Matched" column indicates which runs also matched the client-side metadata criteria
+   - Runs matching ALL specified query fields will have "Yes" in the "Metadata Matched" column
    - Comparisons are case-insensitive (e.g., `Canine` matches `CANINE` or `canine`)
    - Values are normalized to strings for comparison
-   - Missing or invalid metadata files cause runs to be excluded when filtering
+   - Missing or invalid metadata files result in "No" in the "Metadata Matched" column
 
 ### Query Field Syntax
 

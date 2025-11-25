@@ -247,9 +247,9 @@ def find_matching_runs(
         run_info["metadata_matched"] = metadata_matched
         run_info["metadata_field_values"] = metadata_field_values
         
-        # Only include runs that match metadata criteria (if filtering is enabled)
-        if not query_fields or metadata_matched:
-            results.append(run_info)
+        # Include all runs that match cloud-side criteria
+        # The metadata_matched flag indicates whether they also matched client-side criteria
+        results.append(run_info)
     
     return results
 
@@ -679,6 +679,14 @@ Examples:
     
     print(f"\nSummary:")
     print(f"  Total runs found: {len(all_results)}")
+    
+    # Show metadata match statistics if query fields were used
+    if query_fields:
+        matched_count = sum(1 for r in all_results if r.get("metadata_matched", False))
+        not_matched_count = len(all_results) - matched_count
+        print(f"  Runs matching metadata criteria: {matched_count}")
+        print(f"  Runs not matching metadata criteria: {not_matched_count}")
+    
     print(f"  Total size: {total_size:,} bytes ({total_size_gb:.2f} GB)")
     print(f"  Results written to: {args.output}")
 
