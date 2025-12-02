@@ -562,6 +562,12 @@ Examples:
         action="store_true",
         help="Print detailed debug information (useful for troubleshooting metadata downloads)"
     )
+    parser.add_argument(
+        "--profile",
+        default=None,
+        help="Optional: AWS profile name to use for authentication (e.g., '319784202922_ViewOnlyAccess'). "
+             "If not specified, uses default AWS credentials or AWS_PROFILE environment variable."
+    )
     
     args = parser.parse_args()
     
@@ -610,8 +616,13 @@ Examples:
         print("Warning: --metadata-file specified but no filtering, reporting, or download requested. "
               "Specify --query-field, --add-report-fields, or --download-metadata to use metadata files.", file=sys.stderr)
     
-    # Initialize S3 client
-    s3_client = boto3.client("s3")
+    # Initialize S3 client with optional profile
+    if args.profile:
+        session = boto3.Session(profile_name=args.profile)
+        s3_client = session.client("s3")
+    else:
+        # Use default credentials or AWS_PROFILE environment variable
+        s3_client = boto3.client("s3")
     
     # Generate date partitions
     date_partitions = generate_date_partitions(start_date, end_date)

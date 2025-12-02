@@ -154,8 +154,14 @@ python query_payload_size.py --bucket my-bucket --prefix invue_fna \
     --add-report-fields run_metadata.PATIENT_ID,run_metadata.SPECIES,run_metadata.INST_SW_VERSION \
     --output-dir ./metadata-downloads --output results.csv
 
-# Using a specific AWS profile
-AWS_PROFILE=my-profile python query_payload_size.py --bucket my-bucket ...
+# Using a specific AWS profile (method 1: command line parameter)
+python query_payload_size.py --bucket my-bucket --prefix invue_fna \
+    --start-date 2022-11-19 --end-date 2022-11-20 \
+    --run-type run_fna --image-sub-folder images/raw_imageset/ \
+    --profile 319784202922_ViewOnlyAccess
+
+# Using a specific AWS profile (method 2: environment variable)
+AWS_PROFILE=319784202922_ViewOnlyAccess python query_payload_size.py --bucket my-bucket ...
 ```
 
 **Required parameters:**
@@ -176,6 +182,8 @@ AWS_PROFILE=my-profile python query_payload_size.py --bucket my-bucket ...
 - `--add-report-fields`: Comma-separated list of dot-notation key paths from metadata JSON to include in CSV output. Example: `run_metadata.PATIENT_ID,run_metadata.SPECIES`
 - `--output-dir`: Directory to download metadata files (required when using `--query-field`, `--add-report-fields`, or `--download-metadata`)
 - `--download-metadata`: Download metadata files even without filtering (requires `--output-dir`)
+- `--profile`: AWS profile name to use for authentication (e.g., `319784202922_ViewOnlyAccess`). Alternatively, set the `AWS_PROFILE` environment variable.
+- `--verbose`: Print detailed debug information (useful for troubleshooting metadata downloads)
 
 **Output CSV columns:**
 - Date/Time: Formatted timestamp from the run
