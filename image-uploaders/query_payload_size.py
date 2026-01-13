@@ -23,14 +23,13 @@ Usage
         --run-type run_fna \
         --image-sub-folder images/raw_imageset/ --output results.csv
 
-    # Query with metadata filtering
+    # Query with metadata filtering (new syntax with metadata file path)
     python query_payload_size.py --bucket my-bucket --prefix invue_fna \
         --start-date 2022-11-19 --end-date 2022-11-20 \
         --serial-numbers IVDX009978 --run-type run_fna \
         --image-sub-folder images/raw_imageset/ \
-        --metadata-file metadata/fna_results.json \
-        --query-field run_metadata.INST_SW_VERSION=1.14.2 \
-        --query-field run_metadata.SPECIES=Canine \
+        --query-field results/fna_results.json:run_metadata.INST_SW_VERSION=1.14.2 \
+        --query-field results/fna_results.json:run_metadata.SPECIES=Canine \
         --output-dir ./metadata-downloads --output results.csv
 
 Requirements
@@ -144,9 +143,8 @@ def find_matching_runs(
     run_type: str,
     run_uuid: Optional[str],
     image_sub_folder: str,
-    metadata_file_path: Optional[str] = None,
-    query_fields: Optional[List[Tuple[str, str]]] = None,
-    add_report_fields: Optional[List[str]] = None,
+    query_fields: Optional[List[Tuple[str, str, str]]] = None,
+    add_report_fields: Optional[List[Tuple[str, str]]] = None,
     output_dir: Optional[str] = None,
     download_metadata: bool = False,
     verbose: bool = False
@@ -154,6 +152,10 @@ def find_matching_runs(
     """
     Find all matching runs for the given criteria and calculate their sizes.
     Optionally filter by metadata and download metadata files.
+    
+    Args:
+        query_fields: List of (metadata_file_path, key_path, expected_value) tuples
+        add_report_fields: List of (metadata_file_path, key_path) tuples
     
     Returns list of dicts with keys: serial_number, timestamp, run_type, run_uuid, size_bytes,
     metadata_matched, and field values for each query field
@@ -193,6 +195,15 @@ def find_matching_runs(
                 "run_uuid": uuid,
             }
     
+    # Collect all unique metadata files needed
+    required_metadata_files = set()
+    if query_fields:
+        for metadata_file_path, _, _ in query_fields:
+            required_metadata_files.add(metadata_file_path)
+    if add_report_fields:
+        for metadata_file_path, _ in add_report_fields:
+            required_metadata_files.add(metadata_file_path)
+    
     # Calculate size for each matching run and optionally filter by metadata
     results = []
     for run_folder_key, run_info in run_folders.items():
@@ -204,53 +215,85 @@ def find_matching_runs(
         metadata_field_values = {}
         additional_field_values = {}
         
-        if metadata_file_path and (query_fields or download_metadata or add_report_fields):
-            # Download metadata file if needed
+        if required_metadata_files or download_metadata:
             if verbose:
                 print(f"  Processing run {run_info['run_uuid']}...", file=sys.stderr)
             
-            local_metadata_path = download_metadata_file(
-                s3_client,
-                bucket,
-                run_folder_key,
-                metadata_file_path,
-                output_dir,
-                run_info["run_uuid"],
-                verbose
-            )
-            
-            if local_metadata_path:
-                # Load and check metadata
-                metadata = load_metadata_file(local_metadata_path)
+            # Download and load all required metadata files
+            loaded_metadata = {}
+            for metadata_file_path in required_metadata_files:
+                local_metadata_path = download_metadata_file(
+                    s3_client,
+                    bucket,
+                    run_folder_key,
+                    metadata_file_path,
+                    output_dir,
+                    f"{run_info['run_uuid']}_{metadata_file_path.replace('/', '_')}",
+                    verbose
+                )
                 
-                if metadata:
-                    if query_fields:
-                        # Check if metadata matches query fields
+                if local_metadata_path:
+                    metadata = load_metadata_file(local_metadata_path)
+                    if metadata:
+                        loaded_metadata[metadata_file_path] = metadata
+                    elif query_fields:
+                        # Invalid JSON - check if this file is needed for query fields
+                        if any(mf == metadata_file_path for mf, _, _ in query_fields):
+                            metadata_matched = False
+                            if verbose:
+                                print(f"  Run {run_info['run_uuid']}: Invalid JSON in '{metadata_file_path}' - NOT MATCHED", file=sys.stderr)
+                elif query_fields:
+                    # Metadata file doesn't exist - check if this file is needed for query fields
+                    if any(mf == metadata_file_path for mf, _, _ in query_fields):
+                        metadata_matched = False
                         if verbose:
-                            print(f"  Checking metadata for run {run_info['run_uuid']}:", file=sys.stderr)
-                        matches, field_values = check_metadata_matches(metadata, query_fields, verbose)
-                        metadata_matched = matches
-                        metadata_field_values = field_values
+                            print(f"  Run {run_info['run_uuid']}: Metadata file '{metadata_file_path}' not found - NOT MATCHED", file=sys.stderr)
+            
+            # Check query fields against appropriate metadata files
+            if query_fields and metadata_matched:  # Only check if we haven't already failed
+                if verbose:
+                    print(f"  Checking metadata for run {run_info['run_uuid']}:", file=sys.stderr)
+                
+                all_matched = True
+                for metadata_file_path, key_path, expected_value in query_fields:
+                    if metadata_file_path not in loaded_metadata:
+                        all_matched = False
+                        field_key = f"{metadata_file_path}:{key_path}"
+                        metadata_field_values[field_key] = ""
                         if verbose:
-                            status = "MATCHED" if matches else "NOT MATCHED"
-                            print(f"  Run {run_info['run_uuid']}: Overall result - {status}", file=sys.stderr)
+                            print(f"    Field '{key_path}' in '{metadata_file_path}': File not loaded - NO MATCH", file=sys.stderr)
+                        continue
                     
-                    # Extract additional report fields if specified
-                    if add_report_fields:
-                        for field_path in add_report_fields:
-                            value = get_nested_value(metadata, field_path)
-                            additional_field_values[field_path] = value if value is not None else ""
-                elif not metadata and query_fields:
-                    # Invalid JSON - treat as not matching only if filtering is required
-                    metadata_matched = False
-                    if verbose:
-                        print(f"  Run {run_info['run_uuid']}: Invalid JSON - NOT MATCHED", file=sys.stderr)
-            else:
-                # Metadata file doesn't exist - treat as not matching only if filtering is required
-                if query_fields:
-                    metadata_matched = False
-                    if verbose:
-                        print(f"  Run {run_info['run_uuid']}: Metadata file not found - NOT MATCHED", file=sys.stderr)
+                    metadata = loaded_metadata[metadata_file_path]
+                    actual_value = get_nested_value(metadata, key_path)
+                    field_key = f"{metadata_file_path}:{key_path}"
+                    metadata_field_values[field_key] = actual_value if actual_value is not None else ""
+                    
+                    if actual_value is None:
+                        all_matched = False
+                        if verbose:
+                            print(f"    Field '{key_path}' in '{metadata_file_path}': NOT FOUND - NO MATCH", file=sys.stderr)
+                    elif actual_value.lower() != expected_value.lower():
+                        all_matched = False
+                        if verbose:
+                            print(f"    Field '{key_path}' in '{metadata_file_path}': Expected '{expected_value}', Found '{actual_value}' - NO MATCH", file=sys.stderr)
+                    elif verbose:
+                        print(f"    Field '{key_path}' in '{metadata_file_path}': Expected '{expected_value}', Found '{actual_value}' - MATCH", file=sys.stderr)
+                
+                metadata_matched = all_matched
+                if verbose:
+                    status = "MATCHED" if metadata_matched else "NOT MATCHED"
+                    print(f"  Run {run_info['run_uuid']}: Overall result - {status}", file=sys.stderr)
+            
+            # Extract additional report fields from appropriate metadata files
+            if add_report_fields:
+                for metadata_file_path, key_path in add_report_fields:
+                    field_key = f"{metadata_file_path}:{key_path}"
+                    if metadata_file_path in loaded_metadata:
+                        value = get_nested_value(loaded_metadata[metadata_file_path], key_path)
+                        additional_field_values[field_key] = value if value is not None else ""
+                    else:
+                        additional_field_values[field_key] = ""
         
         # Add metadata match status and field values to result
         run_info["metadata_matched"] = metadata_matched
@@ -273,19 +316,33 @@ def format_timestamp(timestamp_str: str) -> str:
         return timestamp_str
 
 
-def parse_query_field(query_field_str: str) -> Tuple[str, str]:
+def parse_query_field(query_field_str: str) -> Tuple[str, str, str]:
     """
-    Parse a query field string in the format 'key.path=value'.
+    Parse a query field string in the format 'metadata/file/path.json:key.path=value'.
     
-    Returns: (key_path, value) tuple
+    Returns: (metadata_file_path, key_path, value) tuple
     Raises: ValueError if format is invalid
     """
-    if "=" not in query_field_str:
-        raise ValueError(f"Invalid query field format: '{query_field_str}'. Expected 'key.path=value'")
+    if ":" not in query_field_str:
+        raise ValueError(f"Invalid query field format: '{query_field_str}'. Expected 'metadata/file/path.json:key.path=value'")
     
-    parts = query_field_str.split("=", 1)
+    # Split on colon to separate metadata file path from field specification
+    colon_parts = query_field_str.split(":", 1)
+    if len(colon_parts) != 2:
+        raise ValueError(f"Invalid query field format: '{query_field_str}'. Expected 'metadata/file/path.json:key.path=value'")
+    
+    metadata_file_path = colon_parts[0].strip()
+    field_spec = colon_parts[1].strip()
+    
+    if not metadata_file_path:
+        raise ValueError(f"Metadata file path cannot be empty: '{query_field_str}'")
+    
+    if "=" not in field_spec:
+        raise ValueError(f"Invalid query field format: '{query_field_str}'. Expected 'metadata/file/path.json:key.path=value'")
+    
+    parts = field_spec.split("=", 1)
     if len(parts) != 2:
-        raise ValueError(f"Invalid query field format: '{query_field_str}'. Expected 'key.path=value'")
+        raise ValueError(f"Invalid query field format: '{query_field_str}'. Expected 'metadata/file/path.json:key.path=value'")
     
     key_path = parts[0].strip()
     value = parts[1].strip()
@@ -293,7 +350,7 @@ def parse_query_field(query_field_str: str) -> Tuple[str, str]:
     if not key_path:
         raise ValueError(f"Query field key path cannot be empty: '{query_field_str}'")
     
-    return (key_path, value)
+    return (metadata_file_path, key_path, value)
 
 
 def get_nested_value(data: dict, key_path: str) -> Optional[str]:
@@ -317,36 +374,38 @@ def get_nested_value(data: dict, key_path: str) -> Optional[str]:
     return str(current) if current is not None else None
 
 
-def check_metadata_matches(metadata: dict, query_fields: List[Tuple[str, str]], verbose: bool = False) -> Tuple[bool, Dict[str, str]]:
+def check_metadata_matches(metadata: dict, query_fields: List[Tuple[str, str, str]], verbose: bool = False) -> Tuple[bool, Dict[str, str]]:
     """
     Check if metadata matches all query fields (case-insensitive string comparison).
     
     Args:
         metadata: JSON metadata dictionary
-        query_fields: List of (key_path, expected_value) tuples
+        query_fields: List of (metadata_file_path, key_path, expected_value) tuples
         verbose: If True, print debug information about comparisons
     
     Returns:
         (matches: bool, field_values: dict) - field_values contains actual values for each query field
+        field_values keys are in format "metadata_file_path:key_path" for uniqueness
     """
     field_values = {}
     
-    for key_path, expected_value in query_fields:
+    for metadata_file_path, key_path, expected_value in query_fields:
         actual_value = get_nested_value(metadata, key_path)
-        field_values[key_path] = actual_value if actual_value is not None else ""
+        field_key = f"{metadata_file_path}:{key_path}"
+        field_values[field_key] = actual_value if actual_value is not None else ""
         
         if actual_value is None:
             if verbose:
-                print(f"    Field '{key_path}': NOT FOUND in metadata", file=sys.stderr)
+                print(f"    Field '{key_path}' in '{metadata_file_path}': NOT FOUND in metadata", file=sys.stderr)
             return (False, field_values)
         
         # Case-insensitive string comparison
         if actual_value.lower() != expected_value.lower():
             if verbose:
-                print(f"    Field '{key_path}': Expected '{expected_value}', Found '{actual_value}' - NO MATCH", file=sys.stderr)
+                print(f"    Field '{key_path}' in '{metadata_file_path}': Expected '{expected_value}', Found '{actual_value}' - NO MATCH", file=sys.stderr)
             return (False, field_values)
         elif verbose:
-            print(f"    Field '{key_path}': Expected '{expected_value}', Found '{actual_value}' - MATCH", file=sys.stderr)
+            print(f"    Field '{key_path}' in '{metadata_file_path}': Expected '{expected_value}', Found '{actual_value}' - MATCH", file=sys.stderr)
     
     return (True, field_values)
 
@@ -357,7 +416,7 @@ def download_metadata_file(
     run_prefix: str,
     metadata_file_path: str,
     output_dir: str,
-    run_uuid: str,
+    filename_base: str,
     verbose: bool = False
 ) -> Optional[str]:
     """
@@ -369,7 +428,7 @@ def download_metadata_file(
         run_prefix: S3 prefix for the run folder
         metadata_file_path: Path to metadata file relative to run folder
         output_dir: Local directory to save the file
-        run_uuid: Run UUID to use as filename
+        filename_base: Base name for the local file (will have .json appended)
         verbose: If True, print debug information
     
     Returns:
@@ -390,8 +449,8 @@ def download_metadata_file(
     # Create output directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
     
-    # Local file path: output_dir/run_uuid.json
-    local_file_path = os.path.join(output_dir, f"{run_uuid}.json")
+    # Local file path: output_dir/filename_base.json
+    local_file_path = os.path.join(output_dir, f"{filename_base}.json")
     
     try:
         s3_client.download_file(bucket, s3_key, local_file_path)
@@ -457,26 +516,17 @@ Examples:
       --start-date 2022-11-19 --end-date 2022-11-20 \\
       --serial-numbers IVDX009978 --run-type run_fna \\
       --image-sub-folder images/raw_imageset/ \\
-      --metadata-file metadata/fna_results.json \\
-      --query-field run_metadata.INST_SW_VERSION=1.14.2 \\
-      --query-field run_metadata.SPECIES=Canine \\
+      --query-field results/fna_results.json:run_metadata.INST_SW_VERSION=1.14.2 \\
+      --query-field results/fna_results.json:run_metadata.SPECIES=Canine \\
       --output-dir ./metadata-downloads --output results.csv
 
-  # Download metadata files without filtering
-  python query_payload_size.py --bucket my-bucket --prefix invue_fna \\
-      --start-date 2022-11-19 --end-date 2022-11-20 \\
-      --serial-numbers IVDX009978 --run-type run_fna \\
-      --image-sub-folder images/raw_imageset/ \\
-      --metadata-file metadata/fna_results.json \\
-      --download-metadata --output-dir ./metadata-downloads
-
-  # Query all devices (no serial number filter) with metadata filtering
+  # Query with filtering on one metadata file and reporting fields from another
   python query_payload_size.py --bucket my-bucket --prefix invue_fna \\
       --start-date 2022-11-19 --end-date 2022-11-20 \\
       --run-type run_fna \\
       --image-sub-folder images/raw_imageset/ \\
-      --metadata-file metadata/fna_results.json \\
-      --query-field run_metadata.INST_SW_VERSION=1.14.2 \\
+      --query-field results/fna_results.json:run_metadata.INST_SW_VERSION=1.14.2 \\
+      --add-report-fields upload-statistics.json:config.throttle_settings.bandwidth_threshold \\
       --output-dir ./metadata-downloads --output results.csv
         """
     )
@@ -530,22 +580,17 @@ Examples:
         help="Output CSV file path (default: query_payload_size.csv)"
     )
     parser.add_argument(
-        "--metadata-file",
-        default=None,
-        help="Optional: Path to metadata JSON file relative to run folder (e.g., 'metadata/run_metadata.json')"
-    )
-    parser.add_argument(
         "--query-field",
         action="append",
         dest="query_fields",
-        help="Query field in format 'key.path=value' (can be specified multiple times). "
-             "Example: --query-field 'run_metadata.INST_SW_VERSION=1.14.2'"
+        help="Query field in format 'metadata/file/path.json:key.path=value' (can be specified multiple times). "
+             "Example: --query-field 'results/fna_results.json:run_metadata.INST_SW_VERSION=1.14.2'"
     )
     parser.add_argument(
         "--add-report-fields",
         default=None,
-        help="Comma-separated list of dot-notation key paths from metadata JSON to include in CSV output. "
-             "Example: 'run_metadata.PATIENT_ID,run_metadata.SPECIES'"
+        help="Comma-separated list of fully-qualified field paths in format 'metadata/file/path.json:key.path'. "
+             "Example: 'upload-statistics.json:config.throttle_settings.bandwidth_threshold,results/fna_results.json:run_metadata.PATIENT_ID'"
     )
     parser.add_argument(
         "--output-dir",
@@ -592,8 +637,8 @@ Examples:
         query_fields = []
         for qf_str in args.query_fields:
             try:
-                key_path, value = parse_query_field(qf_str)
-                query_fields.append((key_path, value))
+                metadata_file_path, key_path, value = parse_query_field(qf_str)
+                query_fields.append((metadata_file_path, key_path, value))
             except ValueError as e:
                 print(f"Error: {e}", file=sys.stderr)
                 sys.exit(1)
@@ -601,7 +646,30 @@ Examples:
     # Parse add-report-fields
     add_report_fields = None
     if args.add_report_fields:
-        add_report_fields = [f.strip() for f in args.add_report_fields.split(",") if f.strip()]
+        add_report_fields = []
+        for field_spec in args.add_report_fields.split(","):
+            field_spec = field_spec.strip()
+            if not field_spec:
+                continue
+            
+            if ":" not in field_spec:
+                print(f"Error: Invalid add-report-field format: '{field_spec}'. Expected 'metadata/file/path.json:key.path'", file=sys.stderr)
+                sys.exit(1)
+            
+            colon_parts = field_spec.split(":", 1)
+            if len(colon_parts) != 2:
+                print(f"Error: Invalid add-report-field format: '{field_spec}'. Expected 'metadata/file/path.json:key.path'", file=sys.stderr)
+                sys.exit(1)
+            
+            metadata_file_path = colon_parts[0].strip()
+            key_path = colon_parts[1].strip()
+            
+            if not metadata_file_path or not key_path:
+                print(f"Error: Invalid add-report-field format: '{field_spec}'. Both metadata file path and key path are required.", file=sys.stderr)
+                sys.exit(1)
+            
+            add_report_fields.append((metadata_file_path, key_path))
+        
         if not add_report_fields:
             print("Error: --add-report-fields must contain at least one field path", file=sys.stderr)
             sys.exit(1)
@@ -611,10 +679,6 @@ Examples:
     if needs_output_dir and not args.output_dir:
         print("Error: --output-dir is required when using --query-field, --add-report-fields, or --download-metadata", file=sys.stderr)
         sys.exit(1)
-    
-    if args.metadata_file and not needs_output_dir:
-        print("Warning: --metadata-file specified but no filtering, reporting, or download requested. "
-              "Specify --query-field, --add-report-fields, or --download-metadata to use metadata files.", file=sys.stderr)
     
     # Initialize S3 client with optional profile
     if args.profile:
@@ -635,16 +699,14 @@ Examples:
     print(f"Run type: {args.run_type}")
     if args.run_uuid:
         print(f"Run UUID: {args.run_uuid}")
-    if args.metadata_file:
-        print(f"Metadata file: {args.metadata_file}")
     if query_fields:
         print(f"Metadata query fields: {len(query_fields)} field(s)")
-        for key_path, value in query_fields:
-            print(f"  - {key_path} = {value}")
+        for metadata_file_path, key_path, value in query_fields:
+            print(f"  - {metadata_file_path}:{key_path} = {value}")
     if add_report_fields:
         print(f"Additional report fields: {len(add_report_fields)} field(s)")
-        for field_path in add_report_fields:
-            print(f"  - {field_path}")
+        for metadata_file_path, key_path in add_report_fields:
+            print(f"  - {metadata_file_path}:{key_path}")
     if args.output_dir:
         print(f"Metadata output directory: {args.output_dir}")
     print()
@@ -662,7 +724,6 @@ Examples:
             args.run_type,
             args.run_uuid,
             args.image_sub_folder,
-            args.metadata_file,
             query_fields,
             add_report_fields,
             args.output_dir,
@@ -683,16 +744,16 @@ Examples:
     if query_fields:
         base_fieldnames.append("Metadata Matched")
         # Add columns for each query field (use the last part of the key path as column name)
-        for key_path, _ in query_fields:
+        for metadata_file_path, key_path, _ in query_fields:
             # Extract the last part of the key path for column name
             column_name = key_path.split(".")[-1]
             base_fieldnames.append(column_name)
     
     # Add columns for additional report fields
     if add_report_fields:
-        for field_path in add_report_fields:
+        for metadata_file_path, key_path in add_report_fields:
             # Extract the last part of the key path as column name
-            column_name = field_path.split(".")[-1]
+            column_name = key_path.split(".")[-1]
             base_fieldnames.append(column_name)
     
     # Write results to CSV
@@ -714,16 +775,18 @@ Examples:
             if query_fields:
                 row["Metadata Matched"] = "Yes" if result.get("metadata_matched", False) else "No"
                 field_values = result.get("metadata_field_values", {})
-                for key_path, _ in query_fields:
+                for metadata_file_path, key_path, _ in query_fields:
                     column_name = key_path.split(".")[-1]
-                    row[column_name] = field_values.get(key_path, "")
+                    field_key = f"{metadata_file_path}:{key_path}"
+                    row[column_name] = field_values.get(field_key, "")
             
             # Add additional report fields if specified
             if add_report_fields:
                 additional_values = result.get("additional_field_values", {})
-                for field_path in add_report_fields:
-                    column_name = field_path.split(".")[-1]
-                    row[column_name] = additional_values.get(field_path, "")
+                for metadata_file_path, key_path in add_report_fields:
+                    column_name = key_path.split(".")[-1]
+                    field_key = f"{metadata_file_path}:{key_path}"
+                    row[column_name] = additional_values.get(field_key, "")
             
             writer.writerow(row)
     
